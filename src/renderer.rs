@@ -327,15 +327,21 @@ impl<'a> Renderer<'a> {
                 color += ambient_color.component_mul(&material.color);
             } else {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
+                let intensity = intensity;
+                let wi = wi;
+                let dist_to_light = dist_to_light;
                 let closest_hit = self
                     .get_closest_hit(Ray {
                         origin: *pos,
-                        dir:    wi,
+                        dir: wi,
                     })
                     .map(|(r, _)| r.time);
-                if closest_hit.is_none() || closest_hit.unwrap() > dist_to_light {
-                    let f = material.bsdf(n, wo, &wi);
-                    color += f.component_mul(&intensity) * wi.dot(n);
+
+                if let Some(hit) = closest_hit {
+                    if (hit - dist_to_light).abs() < 0.0000001 {
+                        let f = material.bsdf(n, wo, &wi);
+                        color += f.component_mul(&intensity) * wi.dot(n);
+                    }
                 }
             }
         }
