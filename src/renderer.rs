@@ -201,12 +201,16 @@ impl<'a> Renderer<'a> {
                         let abs = medium.absorption(&collision);
                         let emm = medium.emission(&collision);
                         let scat = medium.scattering(&collision);
+
                         let mut color = if _num_bounces == 0 {
                             abs * emm
                         } else {
                             glm::vec3(0.0, 0.0, 0.0)
                         };
-                        // color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
+
+                        // direct lighting for media particle
+                        color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
+
                         if _num_bounces < self.max_bounces {
                             let (wi, ph_p) = medium.sample_ph(&wo, rng);
 
@@ -215,8 +219,12 @@ impl<'a> Renderer<'a> {
                                 dir:    wi,
                             };
 
+                            // compute scattered light recursively
                             let mut indirect =
                                 scat * self.trace_ray(new_ray, _num_bounces + 1, rng);
+
+                            // note that there is no cosine factor, because the media is a
+                            // point-like sphere
                             indirect /= ph_p;
                             indirect *= medium.phase(&wo, &wi);
 
@@ -283,15 +291,21 @@ impl<'a> Renderer<'a> {
                 color += ambient_color.component_mul(&em);
             } else {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
-                let closest_hit = self
-                    .get_closest_hit(Ray {
-                        origin: *pos,
-                        dir:    wi,
-                    })
-                    .map(|(r, _)| r.time);
+                let ray = Ray {
+                    origin: *pos,
+                    dir:    wi,
+                };
+                let closest_hit = self.get_closest_hit(ray.clone()).map(|(r, _)| r.time);
                 if closest_hit.is_none() || closest_hit.unwrap() > dist_to_light {
+                    // analogue of bsdf
                     let ph = medium.phase(wo, &wi);
-                    color += &intensity * scat * ph;
+                    // radiance from the light is scattered and diminished by media
+                    // note that there is no cosine factor
+                    color += scat
+                        * medium.transmittence(&ray, f64::MAX, 0.0, rng)
+                        * &intensity
+                        * scat
+                        * ph;
                 }
             }
         }

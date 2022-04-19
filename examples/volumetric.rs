@@ -89,8 +89,8 @@ fn main() -> color_eyre::Result<()> {
         .height(1024)
         .filter(Filter::Box(1))
         .max_bounces(4)
-        .num_samples(1000)
-        .iterative_render(250, |iteration, buffer| {
+        .num_samples(100)
+        .iterative_render(10, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",
