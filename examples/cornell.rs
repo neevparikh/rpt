@@ -2,6 +2,7 @@
 //!
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
+use std::fs;
 use std::time::Instant;
 
 use rpt::*;
@@ -77,9 +78,11 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(right_wall).material(green));
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
+    // scene.add(Object::new(light_rect.clone()).material(light_mtl));
     scene.add(Light::Object(Object::new(light_rect).material(light_mtl)));
 
     let mut time = Instant::now();
+    fs::create_dir_all("results/")?;
     Renderer::new(&scene, camera)
         .width(1024)
         .height(1024)
@@ -96,7 +99,7 @@ fn main() -> color_eyre::Result<()> {
             );
             buffer
                 .image()
-                .save(format!("output_{:03}.png", iteration - 1))
+                .save(format!("results/output_{:03}.png", iteration - 1))
                 .expect("Failed to save image");
             time = Instant::now();
         });
