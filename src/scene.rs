@@ -1,5 +1,6 @@
 use crate::environment::Environment;
 use crate::light::Light;
+use crate::medium::Medium;
 use crate::object::Object;
 
 /// Object representing a scene that can be rendered
@@ -10,6 +11,9 @@ pub struct Scene {
 
     /// Collection of lights in the scene
     pub lights: Vec<Light>,
+
+    /// Collection of lights in the scene
+    pub media: Vec<Medium>,
 
     /// Environment map used for scene lighting
     pub environment: Environment,
@@ -37,5 +41,11 @@ impl SceneAdd<Object> for Scene {
 impl SceneAdd<Light> for Scene {
     fn add(&mut self, light: Light) {
         self.lights.push(light);
+    }
+}
+
+impl SceneAdd<Medium> for Scene {
+    fn add(&mut self, medium: Medium) {
+        self.media.push(medium);
     }
 }
