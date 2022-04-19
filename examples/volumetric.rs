@@ -80,7 +80,9 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
     scene.add(Light::Object(Object::new(light_rect).material(light_mtl)));
-    scene.add(Medium::homogeneous_isotropic(0.001, 0.001)); // foggy
+    scene.add(Medium::homogeneous_isotropic(0.0005, 0.0005)); // foggy
+
+    // scene.add(Medium::colored_glowing_fog(0.0001, 0.0001)); // colorful glow
 
     let mut time = Instant::now();
     fs::create_dir_all("volumetric_results/")?;
@@ -90,7 +92,7 @@ fn main() -> color_eyre::Result<()> {
         .filter(Filter::Box(1))
         .max_bounces(4)
         .num_samples(100)
-        .iterative_render(10, |iteration, buffer| {
+        .iterative_render(50, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",

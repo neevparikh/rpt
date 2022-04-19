@@ -84,6 +84,30 @@ impl Medium {
             }),
         }
     }
+
+    /// Create a colored, emissive homogeneous isotropic medium
+    pub fn colored_glowing_fog(absorption: f64, scattering: f64) -> Medium {
+        Medium {
+            absorption: Box::new(move |_| absorption),
+            scattering: Box::new(move |_| scattering),
+            emission:   Box::new(move |x| {
+                if x[1] > 250.0 {
+                    hex_color(0xFF0000) * 10.0
+                } else {
+                    hex_color(0x0000FF) * 10.0
+                }
+            }),
+            phase:      Box::new(move |_, _| 1.0 / 4.0 * glm::pi::<f64>()),
+            sample_ph:  Box::new(move |_, rng| {
+                let wo = glm::vec3(
+                    rng.gen_range(0.0..1.0),
+                    rng.gen_range(0.0..1.0),
+                    rng.gen_range(0.0..1.0),
+                );
+                (glm::normalize(&wo), 1.0 / 4.0 * glm::pi::<f64>())
+            }),
+        }
+    }
 }
 
 impl Medium {
