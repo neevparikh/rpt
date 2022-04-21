@@ -2,6 +2,10 @@ use crate::environment::Environment;
 use crate::light::Light;
 use crate::medium::Medium;
 use crate::object::Object;
+use crate::{Material, Mesh};
+
+/// Type for adding light and object at the same time
+pub type LightAndMeshObject = (Mesh, Material);
 
 /// Object representing a scene that can be rendered
 #[derive(Default)]
@@ -41,6 +45,22 @@ impl SceneAdd<Object> for Scene {
 impl SceneAdd<Light> for Scene {
     fn add(&mut self, light: Light) {
         self.lights.push(light);
+    }
+}
+
+/// Implements adding object lights as both objects and lights at the same time
+/// This is needed because Light::Object cannot implement clone, so we cannot clone the underlying
+/// object, only Mesh can be cloned. Thus, we take in a Mesh and a Material
+///
+/// option 1 -> Light::Object should be refactored, and Light should be at trait
+/// option 2 -> add them separately, conform to existing abstraction
+impl SceneAdd<LightAndMeshObject> for Scene {
+    fn add(&mut self, m: LightAndMeshObject) {
+        let (mesh, material) = m;
+        let obj = Object::new(mesh.clone()).material(material);
+        let light = Light::Object(Object::new(mesh.clone()).material(material));
+        self.add(obj);
+        self.add(light);
     }
 }
 
