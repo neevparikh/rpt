@@ -1,12 +1,271 @@
+use nalgebra;
 use rand::rngs::StdRng;
 use rand::Rng;
 use rand_distr::{UnitCircle, UnitDisc};
 
 use crate::color::{hex_color, Color};
 
-/// Represents a shader material with some physical properties
 #[derive(Copy, Clone)]
-pub struct Material {
+pub enum Material {
+    Lambertian {
+        albedo: Color,
+        emittance: f64,
+    },
+    Phong {
+        albedo: Color,
+        shininess: f64,
+        emittance: f64,
+    },
+    Mirror,
+    Transmissive {
+        albedo: Color,
+        ior: f64,
+    },
+}
+
+impl Default for Material {
+    fn default() -> Self {
+        Self::Lambertian {
+            albedo: glm::vec3(0.5, 0.5, 0.5),
+            emittance: 0.,
+        }
+    }
+}
+
+impl Material {
+    /// Perfect diffuse (Lambertian) material with a given color
+    pub fn diffuse(color: Color) -> Material {
+        Self::Lambertian {
+            albedo: color,
+            emittance: 0.,
+        }
+    }
+
+    /// Specular material with a given color and roughness
+    pub fn specular(color: Color, roughness: f64) -> Material {
+        Self::Phong {
+            albedo: color,
+            shininess: roughness,
+            emittance: 0.,
+        }
+    }
+
+    /// Creates a perfectly reflective material
+    pub fn mirror() -> Material {
+        Self::Mirror
+    }
+
+    /// Clear material with a specified index of refraction and roughness (such as glass)
+    pub fn clear(index: f64, roughness: f64) -> Self {
+        Self::Transmissive {
+            albedo: glm::vec3(0., 0., 0.),
+            ior: index,
+        }
+    }
+
+    /// Colored transparent material
+    pub fn transparent(color: Color, index: f64, roughness: f64) -> Self {
+        Self::Transmissive {
+            albedo: color,
+            ior: index,
+        }
+    }
+
+    /// Metallic material (has extra tinted specular reflections)
+    pub fn metallic(color: Color, roughness: f64) -> Self {
+        Self::Phong {
+            albedo: color,
+            shininess: roughness,
+            emittance: 0.,
+        }
+    }
+
+    /// Perfect emissive material, useful for modeling area lights
+    pub fn light(color: Color, emittance: f64) -> Self {
+        Self::Lambertian {
+            albedo: color,
+            emittance,
+        }
+    }
+}
+
+impl Material {
+    pub fn emittance(&self) -> f64 {
+        match self {
+            &Self::Lambertian { emittance, .. } => emittance,
+            &Self::Phong { emittance, .. } => emittance,
+            _ => 0.,
+        }
+    }
+    pub fn color(&self) -> Color {
+        match self {
+            &Self::Lambertian { albedo, .. } => albedo,
+            &Self::Phong { albedo, .. } => albedo,
+            _ => glm::vec3(0., 0., 0.),
+        }
+    }
+    pub fn get_diffuse(&self) -> glm::DVec3 {
+        match self {
+            &Self::Lambertian { albedo, .. } => albedo,
+            &Self::Phong { albedo, .. } => glm::vec3(0.5, 0.5, 0.5),
+            _ => glm::vec3(0., 0., 0.),
+        }
+    }
+    pub fn get_specular(&self) -> glm::DVec3 {
+        match self {
+            Self::Lambertian { albedo, .. } => glm::vec3(0., 0., 0.),
+            Self::Phong { albedo, .. } => glm::vec3(0.5, 0.5, 0.5),
+            Self::Mirror => glm::vec3(1., 1., 1.),
+            Self::Transmissive { .. } => glm::vec3(1., 1., 1.),
+        }
+    }
+}
+
+// fn snell_solve() -> f64 {
+//     (1. - (ni / nt).powi(2) * (1. - cos_theta_i.powi(2))).sqrt()
+// }
+
+// fn refract_ray(
+//     ni: f64,
+//     nt: f64,
+//     w_i: glm::DVec3,
+//     cos_theta_i: f64,
+//     cos_theta_t: f64,
+//     normal: glm::DVec3,
+// ) -> glm::DVec3 {
+//     (ni / nt) * (-w_i) + ((ni / nt) * cost_theta_i - cos_theta_t) * normal
+// }
+
+// fn schlick(ni: f64, nt: f64, cos_theta_i) -> f64 {
+//     let r0: f64= ((ni - nt) / (ni + nt)).powi(2);
+//     r0 + (1. - r0) * (1 - cos_theta_i).powi(5)
+// }
+
+impl Material {
+    /// sample a bounce direction
+    pub fn sample_f(
+        &self,
+        normal: &glm::DVec3,
+        wo: &glm::DVec3,
+        rng: &mut StdRng,
+    ) -> Option<(glm::DVec3, f64)> {
+        match self {
+            Self::Lambertian { .. } => {
+                let r1: f64 = rng.gen();
+                let r2: f64 = rng.gen();
+                let phi = 2. * glm::pi::<f64>() * r1;
+                let theta = r2.sqrt().cos();
+                let pdf_of_sample = theta.cos() / glm::pi::<f64>();
+                let random_hemisphere_dir = glm::vec3(
+                    theta.sin() * phi.cos(),
+                    theta.cos(),
+                    theta.sin() * phi.sin(),
+                );
+
+                // rotate towards normal
+                let rotation: nalgebra::Rotation3<f64> =
+                    nalgebra::Rotation3::rotation_between(&glm::vec3(0., 1., 0.), &normal)
+                        .unwrap_or_else(|| {
+                            nalgebra::Rotation3::rotation_between(
+                                &glm::vec3(0., 1., 0.00000001),
+                                &normal,
+                            )
+                            .unwrap()
+                        });
+                let bounce_direction = rotation * random_hemisphere_dir;
+
+                Some((bounce_direction.normalize(), pdf_of_sample))
+            }
+            &Self::Phong { shininess, .. } => {
+                let r1: f64 = rng.gen();
+                let r2: f64 = rng.gen();
+                let phi = 2. * glm::pi::<f64>() * r1;
+                let theta = r2.powf(1. / (shininess + 1.)).acos();
+                let pdf_of_sample =
+                    (shininess + 1.) / (2. * glm::pi::<f64>()) * theta.cos().powf(shininess);
+                let random_hemisphere_dir = glm::vec3(
+                    theta.sin() * phi.cos(),
+                    theta.cos(),
+                    theta.sin() * phi.sin(),
+                );
+
+                let reflected = -glm::reflect_vec(&wo, normal);
+
+                // rotate towards reflection
+                let rotation = glm::quat_rotation(&glm::vec3(0., 1., 0.), &reflected);
+                let bounce_direction =
+                    glm::quat_rotate_vec3(&rotation, &random_hemisphere_dir).normalize();
+
+                Some((bounce_direction, pdf_of_sample))
+            }
+            &Self::Mirror => Some((-glm::reflect_vec(wo, &normal.normalize()), 1.)),
+            &Self::Transmissive { ior, .. } => {
+                // let inside = normal.dot(wo) < 0.;
+                // let cos_theta_i = wo.dot(&if inside { -normal } else { *normal }).clamp(0., 1.);
+                // let ni = outgoing_ray.ior;
+                // let nt = next_ior(outgoing_ray);
+
+                // let schlick_ratio = schlick(ni, nt, cos_theta_i).clamp(0.0, 1.0);
+
+                // if rng.gen::<f64>() < schlick_ratio {
+                //     let reflected = glm::reflect_vec(&wo, &normal);
+
+                //     // set return values
+                //     Some((reflected, 1.))
+                // } else {
+                //     let cos_theta_t = snell_solve(ni, nt, cos_theta_i);
+
+                //     if cos_theta_t.is_nan() {
+                //         // HACK: if result of solving for cos_theta_t is NaN, then we
+                //         // have total internal reflection. Rather than special casing
+                //         // the return type for this, we simply bounce the ray back the
+                //         // direction it came with a very high pdf. Since we divide by
+                //         // the pdf, the resultant light value will be very small, as if
+                //         // no light had been reflected at all, which is what we want to
+                //         // simulate total internal reflection.
+                //         None
+                //     } else {
+                //         let refracted = refract_ray(
+                //             ni,
+                //             nt,
+                //             *wo,
+                //             cos_theta_i,
+                //             cos_theta_t,
+                //             if inside { -normal } else { normal },
+                //         );
+
+                //         Some((refracted, 1.))
+                //     }
+                // }
+                todo!()
+            }
+        }
+    }
+
+    /// calculate brdf
+    pub fn bsdf(&self, normal: &glm::DVec3, wo: &glm::DVec3, wi: &glm::DVec3) -> Color {
+        match self {
+            &Self::Lambertian { albedo, .. } => glm::one_over_pi::<f64>() * albedo,
+            &Self::Phong {
+                albedo, shininess, ..
+            } => {
+                let normalization = albedo * ((shininess + 2.) / (2. * glm::pi::<f64>()));
+
+                let reflected = -glm::reflect_vec(wi, normal).normalize();
+
+                normalization * reflected.dot(&wo).clamp(0., 1.).powf(shininess)
+            }
+            &Self::Mirror => glm::vec3(1., 1., 1.),
+            &Self::Transmissive { .. } => {
+                todo!()
+            }
+        }
+    }
+}
+
+/*
+#[derive(Copy, Clone)]
+pub struct MicroFacetMaterial {
     /// Albedo color
     pub color: Color,
 
@@ -323,3 +582,4 @@ fn local_to_world(n: &glm::DVec3) -> glm::DMat3 {
     let nss = n.cross(&ns);
     glm::mat3(ns.x, nss.x, n.x, ns.y, nss.y, n.y, ns.z, nss.z, n.z)
 }
+*/

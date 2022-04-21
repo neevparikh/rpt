@@ -20,6 +20,7 @@ fn main() -> color_eyre::Result<()> {
     };
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
+    let gloss = Material::specular(hex_color(0xAA0000), 2.0);
     let red = Material::diffuse(hex_color(0xBC0000));
     let green = Material::diffuse(hex_color(0x00BC00));
     let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
@@ -83,12 +84,12 @@ fn main() -> color_eyre::Result<()> {
         .width(512)
         .height(512)
         .filter(Filter::Box(1))
-        .max_bounces(2)
-        .num_samples(100)
+        .max_bounces(5)
+        .num_samples(10)
         .photon_map_render(10_000_000);
 
     image
-        .save(format!("output4.png"))
+        .save(format!("output7.png"))
         .expect("Failed to save image");
 
     Ok(())

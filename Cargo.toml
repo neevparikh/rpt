@@ -12,12 +12,14 @@ edition = "2021"
 
 [dependencies]
 glm = { version = "0.10.0", package = "nalgebra-glm" }
+nalgebra = "0.24.0"
 image = "0.23.13"
 rand = "0.8.3"
 rand_distr = "0.4.0"
 rayon = "1.5.0"
 kd-tree = "0.4.1"
 typenum = "1.15.0"
+indicatif = {version = "0.16.2", features = ["rayon"]}
 
 [dev-dependencies]
 color-eyre = "0.5.10"

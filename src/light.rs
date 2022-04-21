@@ -38,7 +38,7 @@ impl Light {
                 let cosine = (-disp.dot(&n)).max(0.0) / len;
                 let surface_area = cosine.max(0.0) / (len * len);
                 (
-                    object.material.color * object.material.emittance * surface_area / p,
+                    object.material.color() * object.material.emittance() * surface_area / p,
                     disp / len,
                     len,
                 )
