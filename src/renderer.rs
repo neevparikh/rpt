@@ -296,16 +296,19 @@ impl<'a> Renderer<'a> {
                     dir:    wi,
                 };
                 let closest_hit = self.get_closest_hit(ray.clone()).map(|(r, _)| r.time);
-                if closest_hit.is_none() || closest_hit.unwrap() > dist_to_light {
-                    // analogue of bsdf
-                    let ph = medium.phase(wo, &wi);
-                    // radiance from the light is scattered and diminished by media
-                    // note that there is no cosine factor
-                    color += scat
-                        * medium.transmittence(&ray, f64::MAX, 0.0, rng)
-                        * &intensity
-                        * scat
-                        * ph;
+
+                if let Some(hit) = closest_hit {
+                    if (hit - dist_to_light).abs() < EPSILON {
+                        // analogue of bsdf
+                        let ph = medium.phase(wo, &wi);
+                        // radiance from the light is scattered and diminished by media
+                        // note that there is no cosine factor
+                        color += scat
+                            * medium.transmittence(&ray, f64::MAX, 0.0, rng)
+                            * &intensity
+                            * scat
+                            * ph;
+                    }
                 }
             }
         }
@@ -333,12 +336,12 @@ impl<'a> Renderer<'a> {
                 let closest_hit = self
                     .get_closest_hit(Ray {
                         origin: *pos,
-                        dir: wi,
+                        dir:    wi,
                     })
                     .map(|(r, _)| r.time);
 
                 if let Some(hit) = closest_hit {
-                    if (hit - dist_to_light).abs() < 0.0000001 {
+                    if (hit - dist_to_light).abs() < EPSILON {
                         let f = material.bsdf(n, wo, &wi);
                         color += f.component_mul(&intensity) * wi.dot(n);
                     }
@@ -501,8 +504,8 @@ impl<'a> Renderer<'a> {
 
                 // page 16 of siggraph course on photon mapping
                 let specular = 1. - material.roughness;
-                let specular = glm::vec3(specular, specular, specular);
-                let diffuse = material.color;
+                let _specular = glm::vec3(specular, specular, specular);
+                let _diffuse = material.color;
                 let specular = glm::vec3(0.1, 0.1, 0.1);
                 let diffuse = glm::vec3(0.5, 0.5, 0.5);
                 let p_r = vec![
@@ -515,7 +518,7 @@ impl<'a> Renderer<'a> {
                 let diffuse_sum = diffuse.x + diffuse.y + diffuse.z;
                 let specular_sum = specular.x + specular.y + specular.z;
                 let p_d = diffuse_sum / (diffuse_sum + specular_sum) * p_r;
-                let p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
+                let _p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
 
                 // only do diffuse russian rouletter for now (no specular)
                 let russian_roulette: f64 = rng.gen();
