@@ -1,5 +1,5 @@
 use image::RgbImage;
-use indicatif::ParallelProgressIterator;
+use indicatif::{ParallelProgressIterator, ProgressBar};
 use kd_tree::{ItemAndDistance, KdPoint, KdTree};
 use nalgebra;
 use rand::rngs::StdRng;
@@ -385,7 +385,7 @@ impl KdPoint for Photon {
 }
 
 /// how many photons to count the contribution of when calculating indirect lighting for a point
-static CLOSEST_N_PHOTONS: usize = 10;
+static CLOSEST_N_PHOTONS: usize = 100;
 
 impl<'a> Renderer<'a> {
     /// renders an image using photon mapping
@@ -402,12 +402,22 @@ impl<'a> Renderer<'a> {
 
         println!("Shooting photons");
         let watts = 1_000.;
-        let mut rng = StdRng::from_entropy();
-        let mut photon_list = Vec::new();
-        for _ in 0..photon_count {
+
+        let pb = ProgressBar::new(photon_count as u64);
+        pb.set_draw_rate(1);
+        let mut photon_list: Vec<Photon> = (0..photon_count)
+            .collect::<Vec<_>>()
+            .into_par_iter()
+            .progress_with(pb)
+            .map(|_|
             // shoot photon from a random light
-            photon_list.extend(self.shoot_photon(watts as f64, &mut rng));
-        }
+            {
+                let mut rng = StdRng::from_entropy();
+                self.shoot_photon(watts as f64, &mut rng)
+            })
+            .flatten()
+            .collect();
+
         // scale photons down to distribute the wattage
         photon_list
             .iter_mut()
@@ -598,6 +608,7 @@ impl<'a> Renderer<'a> {
             // trace ray
             color += self.trace_ray_with_photon_map(
                 self.camera.cast_ray(xn + dx, yn + dy, rng),
+                0,
                 rng,
                 photon_map,
             );
@@ -610,6 +621,7 @@ impl<'a> Renderer<'a> {
     fn trace_ray_with_photon_map(
         &self,
         ray: Ray,
+        num_bounces: u32,
         rng: &mut StdRng,
         photon_map: &KdTree<Photon>,
     ) -> Color {
@@ -620,43 +632,63 @@ impl<'a> Renderer<'a> {
                 let material = object.material;
                 let wo = -glm::normalize(&ray.dir);
 
-                let near_photons = photon_map
-                    .nearests(&[world_pos.x, world_pos.y, world_pos.z], CLOSEST_N_PHOTONS);
+                if material.is_mirror() {
+                    if num_bounces > 5 {
+                        return Color::new(0., 0., 0.);
+                    }
+                    if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
+                        self.trace_ray_with_photon_map(
+                            Ray {
+                                origin: world_pos,
+                                dir: wi,
+                            },
+                            num_bounces + 1,
+                            rng,
+                            photon_map,
+                        )
+                    } else {
+                        // total internal reflection
+                        Color::new(0., 0., 0.)
+                    }
+                } else {
+                    let near_photons = photon_map
+                        .nearests(&[world_pos.x, world_pos.y, world_pos.z], CLOSEST_N_PHOTONS);
 
-                // of the nearest photons, how far away is the furthest one?
-                let max_dist_squared = near_photons
-                    .iter()
-                    .map(
-                        |ItemAndDistance {
-                             squared_distance, ..
-                         }| { squared_distance },
-                    )
-                    .fold(0., |acc: f64, &p: &f64| acc.max(p));
+                    // of the nearest photons, how far away is the furthest one?
+                    let max_dist_squared = near_photons
+                        .iter()
+                        .map(
+                            |ItemAndDistance {
+                                 squared_distance, ..
+                             }| { squared_distance },
+                        )
+                        .fold(0., |acc: f64, &p: &f64| acc.max(p));
 
-                let mut color = Color::new(0.0, 0.0, 0.0);
+                    let mut color = Color::new(0.0, 0.0, 0.0);
 
-                // indirect lighting via photon map
-                for ItemAndDistance {
-                    item: photon,
-                    squared_distance: _,
-                } in near_photons
-                {
-                    color += material
-                        .bsdf(&h.normal, &wo, &photon.direction)
-                        .component_mul(&photon.power)
-                        * photon.direction.dot(&h.normal).clamp(0., 1.);
+                    // indirect lighting via photon map
+                    for ItemAndDistance {
+                        item: photon,
+                        squared_distance: _,
+                    } in near_photons
+                    {
+                        color += material
+                            .bsdf(&h.normal, &wo, &photon.direction)
+                            .component_mul(&photon.power)
+                            * photon.direction.dot(&h.normal).clamp(0., 1.);
+                    }
+
+                    // normalize by (1/(pi * r^2))
+                    color = color * (1. / (glm::pi::<f64>() * max_dist_squared));
+
+                    // direct lighting via light sampling
+                    // color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
+
+                    // emitted lighting
+                    // color += material.emittance() * material.color();
+
+                    color
                 }
-
-                // normalize by (1/(pi * r^2))
-                color = color * (1. / (glm::pi::<f64>() * max_dist_squared));
-
-                // direct lighting via light sampling
-                color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
-
-                // emitted lighting
-                color += material.emittance() * material.color();
-
-                color
             }
         }
     }

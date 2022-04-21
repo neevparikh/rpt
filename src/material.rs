@@ -119,6 +119,12 @@ impl Material {
             Self::Transmissive { .. } => glm::vec3(1., 1., 1.),
         }
     }
+    pub fn is_mirror(&self) -> bool {
+        match self {
+            Self::Mirror => true,
+            _ => false
+        }
+    }
 }
 
 // fn snell_solve() -> f64 {
