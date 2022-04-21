@@ -76,9 +76,9 @@ impl Medium {
             phase:      Box::new(move |_, _| 1.0 / 4.0 * glm::pi::<f64>()),
             sample_ph:  Box::new(move |_, rng| {
                 let wo = glm::vec3(
-                    rng.gen_range(0.0..1.0),
-                    rng.gen_range(0.0..1.0),
-                    rng.gen_range(0.0..1.0),
+                    rng.gen_range(-1.0..1.0),
+                    rng.gen_range(-1.0..1.0),
+                    rng.gen_range(-1.0..1.0),
                 );
                 (glm::normalize(&wo), 1.0 / 4.0 * glm::pi::<f64>())
             }),
