@@ -14,17 +14,18 @@ fn main() -> color_eyre::Result<()> {
     let mut scene = Scene::new();
 
     let camera = Camera {
-        eye: glm::vec3(278.0, 273.0, -800.0),
+        eye: glm::vec3(278.0, 273.0, 1.0),
         direction: glm::vec3(0.0, 0.0, 1.0),
         up: glm::vec3(0.0, 1.0, 0.0),
-        fov: 0.686,
+        fov: 2.1,
         ..Default::default()
     };
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
+    let _yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
+    let light_mtl = Material::light(hex_color(0xFFFEFA), 1000.0);
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -32,23 +33,46 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 0.0, 559.2),
         glm::vec3(556.0, 0.0, 0.0),
     ]);
-    let ceiling = polygon(&[
-        glm::vec3(0.0, 548.9, 0.0),
-        glm::vec3(556.0, 548.9, 0.0),
-        glm::vec3(556.0, 548.9, 559.2),
-        glm::vec3(0.0, 548.9, 559.2),
-    ]);
-    let light_rect = polygon(&[
-        glm::vec3(343.0, 548.8, 227.0),
-        glm::vec3(343.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 227.0),
-    ]);
+
+    let p1 = glm::vec3(343.0, 548.9, 227.0);
+    let p2 = glm::vec3(343.0, 548.9, 332.0);
+    let p3 = glm::vec3(213.0, 548.9, 332.0);
+    let p4 = glm::vec3(213.0, 548.9, 227.0);
+
+    let c1 = glm::vec3(0.0, 548.9, 0.0);
+    let c2 = glm::vec3(556.0, 548.9, 0.0);
+    let c3 = glm::vec3(556.0, 548.9, 559.2);
+    let c4 = glm::vec3(0.0, 548.9, 559.2);
+
+    let br = glm::vec3(p3[0], c4[1], c4[2]);
+    let bl = glm::vec3(p2[0], c3[1], c3[2]);
+    let fr = glm::vec3(p4[0], c1[1], c1[2]);
+    let fl = glm::vec3(p1[0], c2[1], c2[2]);
+
+    let ceiling_1 = polygon(&[c1, fr, br, c4]);
+    let ceiling_2 = polygon(&[p3, p2, bl, br]);
+    let ceiling_3 = polygon(&[fl, c2, c3, bl]);
+    let ceiling_4 = polygon(&[fr, fl, p1, p4]);
+
+    let shift = glm::vec3(0.0, 500.0, 0.0);
+    let b1 = p1 + shift;
+    let b2 = p2 + shift;
+    let b3 = p3 + shift;
+    let b4 = p4 + shift;
+
+    let light_rect = polygon(&[b1, b2, b3, b4]);
+
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
         glm::vec3(556.0, 548.9, 559.2),
         glm::vec3(556.0, 0.0, 559.2),
+    ]);
+    let front_wall = polygon(&[
+        glm::vec3(0.0, 0.0, 0.0),
+        glm::vec3(556.0, 0.0, 0.0),
+        glm::vec3(556.0, 548.9, 0.0),
+        glm::vec3(0.0, 548.9, 0.0),
     ]);
     let right_wall = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -63,25 +87,20 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 0.0),
     ]);
 
-    let large_box = cube()
-        .scale(&glm::vec3(165.0, 330.0, 165.0))
-        .rotate_y(glm::two_pi::<f64>() * (-253.0 / 360.0))
-        .translate(&glm::vec3(368.0, 165.0, 351.0));
-    let small_box = cube()
-        .scale(&glm::vec3(165.0, 165.0, 165.0))
-        .rotate_y(glm::two_pi::<f64>() * (-197.0 / 360.0))
-        .translate(&glm::vec3(185.0, 82.5, 169.0));
-
     scene.add(Object::new(floor).material(white));
-    scene.add(Object::new(ceiling).material(white));
+    scene.add(Object::new(ceiling_1).material(white));
+    scene.add(Object::new(ceiling_2).material(white));
+    scene.add(Object::new(ceiling_3).material(white));
+    scene.add(Object::new(ceiling_4).material(white));
     scene.add(Object::new(back_wall).material(white));
+    scene.add(Object::new(front_wall).material(white));
     scene.add(Object::new(left_wall).material(red));
     scene.add(Object::new(right_wall).material(green));
-    scene.add(Object::new(large_box).material(white));
-    scene.add(Object::new(small_box).material(white));
-    scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    scene.add(Medium::homogeneous_isotropic(0.0002, 0.002)); // foggy
+    scene.add((light_rect, light_mtl));
+    scene.environment = Environment::Color(hex_color(0x87CEEB));
+
+    scene.add(Medium::homogeneous_isotropic(0.00001, 0.002)); // foggy
 
     let mut time = Instant::now();
     fs::create_dir_all("volumetric_results/")?;

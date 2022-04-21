@@ -8,8 +8,6 @@ use std::time::Instant;
 
 use rpt::*;
 
-const EPSILON: f64 = 1e-12;
-
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
@@ -41,6 +39,7 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
     ]);
+
     let light_rect = polygon(&[
         glm::vec3(343.0, 548.8, 227.0),
         glm::vec3(343.0, 548.8, 332.0),
@@ -48,31 +47,31 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(213.0, 548.8, 227.0),
     ]);
 
-    let height = 70.0;
+    let shift = glm::vec3(0.0, 70.0, 0.0);
 
     let front_shade = polygon(&[
-        glm::vec3(343.0 + EPSILON, 548.9 - height, 227.0 + EPSILON),
-        glm::vec3(343.0 + EPSILON, 548.9, 227.0 + EPSILON), // 1
-        glm::vec3(213.0 + EPSILON, 548.9, 227.0 + EPSILON),
-        glm::vec3(213.0 + EPSILON, 548.9 - height, 227.0 + EPSILON), // 4
-    ]);
-    let right_shade = polygon(&[
-        glm::vec3(343.0 + EPSILON, 548.9 - height, 332.0 + EPSILON),
-        glm::vec3(343.0 + EPSILON, 548.9, 332.0 + EPSILON), // 2
-        glm::vec3(343.0 + EPSILON, 548.9, 227.0 + EPSILON),
-        glm::vec3(343.0 + EPSILON, 548.9 - height, 227.0 + EPSILON), // 1
-    ]);
-    let back_shade = polygon(&[
-        glm::vec3(213.0 + EPSILON, 548.9 - height, 332.0 + EPSILON),
-        glm::vec3(213.0 + EPSILON, 548.9, 332.0 + EPSILON), // 3
-        glm::vec3(343.0 + EPSILON, 548.9, 332.0 + EPSILON),
-        glm::vec3(343.0 + EPSILON, 548.9 - height, 332.0 + EPSILON), // 2
+        glm::vec3(343.0, 548.8, 227.0) - shift,
+        glm::vec3(343.0, 548.8, 332.0) - shift,
+        glm::vec3(343.0, 548.8, 332.0),
+        glm::vec3(343.0, 548.8, 227.0),
     ]);
     let left_shade = polygon(&[
-        glm::vec3(213.0 + EPSILON, 548.9 - height, 227.0 + EPSILON),
-        glm::vec3(213.0 + EPSILON, 548.9, 227.0 + EPSILON), // 4
-        glm::vec3(213.0 + EPSILON, 548.8, 332.0 + EPSILON),
-        glm::vec3(213.0 + EPSILON, 548.9 - height, 332.0 + EPSILON), // 3
+        glm::vec3(343.0, 548.8, 332.0) - shift,
+        glm::vec3(213.0, 548.8, 332.0) - shift,
+        glm::vec3(213.0, 548.8, 332.0),
+        glm::vec3(343.0, 548.8, 332.0),
+    ]);
+    let back_shade = polygon(&[
+        glm::vec3(213.0, 548.8, 332.0) - shift,
+        glm::vec3(213.0, 548.8, 227.0) - shift,
+        glm::vec3(213.0, 548.8, 227.0),
+        glm::vec3(213.0, 548.8, 332.0),
+    ]);
+    let right_shade = polygon(&[
+        glm::vec3(213.0, 548.8, 227.0) - shift,
+        glm::vec3(343.0, 548.8, 227.0) - shift,
+        glm::vec3(343.0, 548.8, 227.0),
+        glm::vec3(213.0, 548.8, 227.0),
     ]);
 
     let back_wall = polygon(&[
@@ -107,7 +106,7 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(ceiling).material(white));
     scene.add(Object::new(back_wall).material(white));
     scene.add(Object::new(left_wall).material(red));
-    scene.add(Object::new(right_wall).material(red));
+    scene.add(Object::new(right_wall).material(green));
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
 
@@ -116,11 +115,9 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(front_shade).material(yellow));
     scene.add(Object::new(back_shade).material(yellow));
 
-    scene.add(Light::Object(Object::new(light_rect).material(light_mtl)));
+    scene.add((light_rect, light_mtl));
 
-    scene.add(Medium::homogeneous_isotropic(0.0001, 0.0005)); // foggy
-
-    // scene.add(Medium::colored_glowing_fog(0.0001, 0.0001)); // colorful glow
+    scene.add(Medium::homogeneous_isotropic(0.0001, 0.001)); // foggy
 
     let mut time = Instant::now();
     fs::create_dir_all("volumetric_results/")?;
@@ -129,8 +126,8 @@ fn main() -> color_eyre::Result<()> {
         .height(1024)
         .filter(Filter::Box(1))
         .max_bounces(4)
-        .num_samples(3000)
-        .iterative_render(500, |iteration, buffer| {
+        .num_samples(1000)
+        .iterative_render(200, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",

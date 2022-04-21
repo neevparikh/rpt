@@ -78,8 +78,7 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(right_wall).material(green));
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
-    // scene.add(Object::new(light_rect.clone()).material(light_mtl));
-    scene.add(Light::Object(Object::new(light_rect).material(light_mtl)));
+    scene.add((light_rect, light_mtl)); // add light and object at the same time
 
     let mut time = Instant::now();
     fs::create_dir_all("results/")?;
