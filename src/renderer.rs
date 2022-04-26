@@ -186,7 +186,7 @@ impl<'a> Renderer<'a> {
                                 let f = material.bsdf(&h.normal, &wo, &wi);
                                 let ray = Ray {
                                     origin: world_pos,
-                                    dir:    wi,
+                                    dir: wi,
                                 };
                                 let indirect = 1.0 / pdf
                                     * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
@@ -218,7 +218,7 @@ impl<'a> Renderer<'a> {
 
                             let new_ray = Ray {
                                 origin: collision,
-                                dir:    wi,
+                                dir: wi,
                             };
 
                             // compute scattered light recursively
@@ -249,7 +249,7 @@ impl<'a> Renderer<'a> {
 
                     // let rr_p: f64 = rng.gen_range(0.0..1.0);
                     let mut color = if _num_bounces == 0 {
-                        material.emittance * material.color
+                        material.emittance() * material.color()
                     } else {
                         glm::vec3(0.0, 0.0, 0.0)
                     };
@@ -259,7 +259,7 @@ impl<'a> Renderer<'a> {
                             let f = material.bsdf(&h.normal, &wo, &wi);
                             let ray = Ray {
                                 origin: world_pos,
-                                dir:    wi,
+                                dir: wi,
                             };
                             let indirect = 1.0 / pdf
                                 * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
@@ -295,7 +295,7 @@ impl<'a> Renderer<'a> {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
                 let ray = Ray {
                     origin: *pos,
-                    dir:    wi,
+                    dir: wi,
                 };
                 let closest_hit = self.get_closest_hit(ray.clone()).map(|(r, _)| r.time);
 
@@ -385,7 +385,7 @@ impl KdPoint for Photon {
 }
 
 /// how many photons to count the contribution of when calculating indirect lighting for a point
-static CLOSEST_N_PHOTONS: usize = 100;
+static CLOSEST_N_PHOTONS: usize = 1;
 
 impl<'a> Renderer<'a> {
     /// renders an image using photon mapping
@@ -533,7 +533,7 @@ impl<'a> Renderer<'a> {
                 let diffuse_sum = diffuse.x + diffuse.y + diffuse.z;
                 let specular_sum = specular.x + specular.y + specular.z;
                 let p_d = diffuse_sum / (diffuse_sum + specular_sum) * p_r;
-                let _p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
+                let p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
 
                 // only do diffuse russian rouletter for now (no specular)
                 let russian_roulette: f64 = rng.gen();
@@ -633,7 +633,7 @@ impl<'a> Renderer<'a> {
                 let wo = -glm::normalize(&ray.dir);
 
                 if material.is_mirror() {
-                    if num_bounces > 5 {
+                    if num_bounces > 100 {
                         return Color::new(0., 0., 0.);
                     }
                     if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
