@@ -1,5 +1,7 @@
 use image::RgbImage;
+use indicatif::ParallelProgressIterator;
 use kd_tree::{ItemAndDistance, KdPoint, KdTree};
+use nalgebra;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -173,7 +175,7 @@ impl<'a> Renderer<'a> {
                         let material = object.material;
 
                         let mut color = if _num_bounces == 0 {
-                            material.emittance * material.color
+                            material.emittance() * material.color()
                         } else {
                             glm::vec3(0.0, 0.0, 0.0)
                         };
@@ -327,7 +329,7 @@ impl<'a> Renderer<'a> {
         let mut color = glm::vec3(0.0, 0.0, 0.0);
         for light in &self.scene.lights {
             if let Light::Ambient(ambient_color) = light {
-                color += ambient_color.component_mul(&material.color);
+                color += ambient_color.component_mul(&material.color());
             } else {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
                 let intensity = intensity;
@@ -336,7 +338,7 @@ impl<'a> Renderer<'a> {
                 let closest_hit = self
                     .get_closest_hit(Ray {
                         origin: *pos,
-                        dir:    wi,
+                        dir: wi,
                     })
                     .map(|(r, _)| r.time);
 
@@ -369,9 +371,9 @@ impl<'a> Renderer<'a> {
 }
 
 struct Photon {
-    pub position:  glm::DVec3,
+    pub position: glm::DVec3,
     pub direction: glm::DVec3,
-    pub power:     glm::DVec3,
+    pub power: glm::DVec3,
 }
 
 impl KdPoint for Photon {
@@ -399,7 +401,7 @@ impl<'a> Renderer<'a> {
         }
 
         println!("Shooting photons");
-        let watts = 100.;
+        let watts = 1_000.;
         let mut rng = StdRng::from_entropy();
         let mut photon_list = Vec::new();
         for _ in 0..photon_count {
@@ -418,25 +420,14 @@ impl<'a> Renderer<'a> {
 
         println!("Tracing rays");
         let mut buffer = Buffer::new(self.width, self.height, self.filter);
-        let count = std::sync::atomic::AtomicUsize::new(0);
         let colors: Vec<_> = (0..self.height)
             .into_par_iter()
+            .progress()
             .flat_map(|y| {
-                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                println!("Count: {}", count.load(std::sync::atomic::Ordering::SeqCst));
-
                 let mut rng = StdRng::from_entropy();
                 (0..self.width)
                     .into_iter()
-                    .map(|x| {
-                        self.get_color_with_photon_map(
-                            x,
-                            y,
-                            self.num_samples,
-                            &mut rng,
-                            &photon_map,
-                        )
-                    })
+                    .map(|x| self.get_color_with_photon_map(x, y, &mut rng, &photon_map))
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -464,23 +455,30 @@ impl<'a> Renderer<'a> {
             let theta = (1. - rng.gen::<f64>()).acos();
             let pdf_of_sample = 0.5 * glm::one_over_pi::<f64>();
             let random_hemisphere_dir = glm::vec3(
-                theta.sin() * phi.sin(),
-                theta.sin(),
+                theta.sin() * phi.cos(),
+                theta.cos(),
                 theta.sin() * phi.sin(),
             );
 
             // rotate direction towards normal
-            let rotation = glm::quat_rotation(&glm::vec3(0., 1., 0.), &n);
-            let direction = glm::quat_rotate_vec3(&rotation, &random_hemisphere_dir).normalize();
+            let rotation: nalgebra::Rotation3<f64> = nalgebra::Rotation3::rotation_between(
+                &glm::vec3(0., 1., 0.),
+                &n,
+            )
+            .unwrap_or_else(|| {
+                nalgebra::Rotation3::rotation_between(&glm::vec3(0., 1., 0.00000001), &n).unwrap()
+            });
+            let direction = rotation * random_hemisphere_dir;
 
             // recursively gather photons
             let photons = self.trace_photon(
                 Ray {
                     origin: pos,
-                    dir:    direction,
+                    dir: direction,
                 },
-                power * object.material.color / pdf / pdf_of_sample,
+                power * object.material.color() / pdf / pdf_of_sample,
                 rng,
+                0,
             );
 
             photons
@@ -491,7 +489,13 @@ impl<'a> Renderer<'a> {
 
     /// trace a photon along ray `ray` with power `power` and check for intersections. Returns
     /// vec of photons that have been recursively traces and placed in the scene
-    fn trace_photon(&self, ray: Ray, power: glm::DVec3, rng: &mut StdRng) -> Vec<Photon> {
+    fn trace_photon(
+        &self,
+        ray: Ray,
+        power: glm::DVec3,
+        rng: &mut StdRng,
+        num_bounces: i32,
+    ) -> Vec<Photon> {
         match self.get_closest_hit(ray) {
             None => {
                 // no photons if we don't hit a scene element
@@ -503,9 +507,10 @@ impl<'a> Renderer<'a> {
                 let wo = -glm::normalize(&ray.dir);
 
                 // page 16 of siggraph course on photon mapping
-                let specular = 1. - material.roughness;
-                let _specular = glm::vec3(specular, specular, specular);
-                let _diffuse = material.color;
+                // let specular = 1. - material.roughness;
+                let specular = 0.1;
+                let specular = material.get_specular();
+                let diffuse = material.get_diffuse();
                 let specular = glm::vec3(0.1, 0.1, 0.1);
                 let diffuse = glm::vec3(0.5, 0.5, 0.5);
                 let p_r = vec![
@@ -522,36 +527,44 @@ impl<'a> Renderer<'a> {
 
                 // only do diffuse russian rouletter for now (no specular)
                 let russian_roulette: f64 = rng.gen();
+
+                let p_d = 0.9;
                 if russian_roulette < p_d {
                     // diffuse reflection
                     if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
                         let f = material.bsdf(&h.normal, &wo, &wi);
                         let ray = Ray {
                             origin: world_pos,
-                            dir:    wi,
+                            dir: wi,
                         };
 
                         // account for the chance of terminating
                         let russian_roulette_scale_factor =
                             glm::vec3(diffuse.x / p_d, diffuse.y / p_d, diffuse.z / p_d);
+                        let russian_roulette_scale_factor = 0.5;
 
                         // gather recursive photons with scaled down power
                         let mut next_photons: Vec<Photon> = self.trace_photon(
                             ray,
-                            power
-                                .component_mul(&russian_roulette_scale_factor)
-                                .component_mul(&f)
+                            power.component_mul(&f)
+                                * russian_roulette_scale_factor
                                 * wi.dot(&h.normal)
                                 / pdf,
                             rng,
+                            num_bounces + 1,
                         );
 
                         // add photon from current step
-                        next_photons.push(Photon {
-                            position: world_pos,
-                            direction: wo,
-                            power,
-                        });
+                        if pdf != 1. {
+                            // only add current photon if surface is not specular (pdf of 1)
+                            if russian_roulette < p_s {
+                                next_photons.push(Photon {
+                                    position: world_pos,
+                                    direction: wo,
+                                    power,
+                                });
+                            }
+                        }
 
                         next_photons
                     } else {
@@ -572,7 +585,6 @@ impl<'a> Renderer<'a> {
         &self,
         x: u32,
         y: u32,
-        iterations: u32,
         rng: &mut StdRng,
         photon_map: &KdTree<Photon>,
     ) -> Color {
@@ -580,7 +592,7 @@ impl<'a> Renderer<'a> {
         let xn = ((2 * x + 1) as f64 - self.width as f64) / dim;
         let yn = ((2 * (self.height - y) - 1) as f64 - self.height as f64) / dim;
         let mut color = glm::vec3(0.0, 0.0, 0.0);
-        for _ in 0..iterations {
+        for _ in 0..self.num_samples {
             let dx = rng.gen_range((-1.0 / dim)..(1.0 / dim));
             let dy = rng.gen_range((-1.0 / dim)..(1.0 / dim));
             // trace ray
@@ -590,7 +602,7 @@ impl<'a> Renderer<'a> {
                 photon_map,
             );
         }
-        color / f64::from(iterations) * 2.0_f64.powf(self.exposure_value)
+        color / f64::from(self.num_samples) * 2.0_f64.powf(self.exposure_value)
     }
 
     /// trace ray `Ray` through the scene to calculate illumination. Uses photon map
@@ -631,7 +643,8 @@ impl<'a> Renderer<'a> {
                 {
                     color += material
                         .bsdf(&h.normal, &wo, &photon.direction)
-                        .component_mul(&photon.power);
+                        .component_mul(&photon.power)
+                        * photon.direction.dot(&h.normal).clamp(0., 1.);
                 }
 
                 // normalize by (1/(pi * r^2))
@@ -641,7 +654,7 @@ impl<'a> Renderer<'a> {
                 color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
                 // emitted lighting
-                color += material.emittance * material.color;
+                color += material.emittance() * material.color();
 
                 color
             }
