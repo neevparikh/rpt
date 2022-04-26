@@ -1,4 +1,5 @@
-//! This is an example of a standard Cornell box, for testing global illumination
+//! This is an example of a standard Cornell box, for testing volumetric global illumination
+//! with participating media
 //!
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
@@ -80,15 +81,17 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(small_box).material(white));
     scene.add((light_rect, light_mtl)); // add light and object at the same time
 
+    scene.add(Medium::homogeneous_isotropic(0.0002, 0.002)); // foggy
+
     let mut time = Instant::now();
-    fs::create_dir_all("results/")?;
+    fs::create_dir_all("volumetric_results/")?;
     Renderer::new(&scene, camera)
         .width(1024)
         .height(1024)
         .filter(Filter::Box(1))
-        .max_bounces(2)
-        .num_samples(100)
-        .iterative_render(10, |iteration, buffer| {
+        .max_bounces(4)
+        .num_samples(1000)
+        .iterative_render(500, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",
@@ -98,7 +101,10 @@ fn main() -> color_eyre::Result<()> {
             );
             buffer
                 .image()
-                .save(format!("results/output_{:03}.png", iteration - 1))
+                .save(format!(
+                    "volumetric_results/output_{:03}.png",
+                    iteration - 1
+                ))
                 .expect("Failed to save image");
             time = Instant::now();
         });

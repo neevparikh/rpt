@@ -14,6 +14,7 @@ use crate::material::Material;
 use crate::object::Object;
 use crate::scene::Scene;
 use crate::shape::{HitRecord, Ray};
+use crate::Medium;
 
 const EPSILON: f64 = 1e-12;
 const FIREFLY_CLAMP: f64 = 100.0;
@@ -38,6 +39,9 @@ pub struct Renderer<'a> {
     /// Optional noise-reduction filter
     pub filter: Filter,
 
+    /// Ray marching step size
+    pub stepsize: f64,
+
     /// The maximum number of ray bounces
     pub max_bounces: u32,
 
@@ -55,6 +59,7 @@ impl<'a> Renderer<'a> {
             height: 600,
             exposure_value: 0.0,
             filter: Filter::default(),
+            stepsize: 0.0,
             max_bounces: 0,
             num_samples: 1,
         }
@@ -75,6 +80,12 @@ impl<'a> Renderer<'a> {
     /// Set the exposure value of the rendered scene
     pub fn exposure_value(mut self, exposure_value: f64) -> Self {
         self.exposure_value = exposure_value;
+        self
+    }
+
+    /// Set the stepsize for ray marching
+    pub fn stepsize(mut self, stepsize: f64) -> Self {
+        self.stepsize = stepsize;
         self
     }
 
@@ -146,35 +157,164 @@ impl<'a> Renderer<'a> {
     }
 
     /// Trace a ray, obtaining a Monte Carlo estimate of the luminance
-    fn trace_ray(&self, ray: Ray, num_bounces: u32, rng: &mut StdRng) -> Color {
-        match self.get_closest_hit(ray) {
-            None => self.scene.environment.get_color(&ray.dir),
-            Some((h, object)) => {
-                let world_pos = ray.at(h.time);
-                let material = object.material;
-                let wo = -glm::normalize(&ray.dir);
+    fn trace_ray(&self, ray: Ray, _num_bounces: u32, rng: &mut StdRng) -> Color {
+        if self.scene.media.len() > 0 {
+            // TODO: this should be intersection tests with a bounded mesh of media
+            let medium = &self.scene.media[0];
 
-                let mut color = material.emittance() * material.color();
-                color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
-                if num_bounces < self.max_bounces {
-                    if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
-                        let f = material.bsdf(&h.normal, &wo, &wi);
-                        let ray = Ray {
-                            origin: world_pos,
-                            dir: wi,
+            // sample distance along ray:
+            let (d, d_pdf, _d_cdf) = medium.sample_d(&ray, rng);
+
+            let wo = -glm::normalize(&ray.dir);
+            // let rr_p: f64 = rng.gen_range(0.0..1.0);
+            match self.get_closest_hit(ray) {
+                None => self.scene.environment.get_color(&ray.dir),
+                Some((h, object)) => {
+                    if d > h.time {
+                        let world_pos = ray.at(h.time);
+                        let material = object.material;
+
+                        let mut color = if _num_bounces == 0 {
+                            material.emittance() * material.color()
+                        } else {
+                            glm::vec3(0.0, 0.0, 0.0)
                         };
-                        let indirect = 1.0 / pdf
-                            * f.component_mul(&self.trace_ray(ray, num_bounces + 1, rng))
-                            * wi.dot(&h.normal).abs();
-                        color.x += indirect.x.min(FIREFLY_CLAMP);
-                        color.y += indirect.y.min(FIREFLY_CLAMP);
-                        color.z += indirect.z.min(FIREFLY_CLAMP);
+                        color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
+                        // maybe use num_bounces in the rr prob
+                        if _num_bounces < self.max_bounces {
+                            if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
+                                let f = material.bsdf(&h.normal, &wo, &wi);
+                                let ray = Ray {
+                                    origin: world_pos,
+                                    dir:    wi,
+                                };
+                                let indirect = 1.0 / pdf
+                                    * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
+                                    * wi.dot(&h.normal).abs();
+                                color.x += indirect.x.min(FIREFLY_CLAMP);
+                                color.y += indirect.y.min(FIREFLY_CLAMP);
+                                color.z += indirect.z.min(FIREFLY_CLAMP);
+                                // color /= rr_p;
+                            }
+                        }
+                        color
+                    } else {
+                        let collision = ray.at(d);
+                        let abs = medium.absorption(&collision);
+                        let emm = medium.emission(&collision);
+                        let scat = medium.scattering(&collision);
+
+                        let mut color = if _num_bounces == 0 {
+                            abs * emm
+                        } else {
+                            glm::vec3(0.0, 0.0, 0.0)
+                        };
+
+                        // direct lighting for media particle
+                        color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
+
+                        if _num_bounces < self.max_bounces {
+                            let (wi, ph_p) = medium.sample_ph(&wo, rng);
+
+                            let new_ray = Ray {
+                                origin: collision,
+                                dir:    wi,
+                            };
+
+                            // compute scattered light recursively
+                            let mut indirect =
+                                scat * self.trace_ray(new_ray, _num_bounces + 1, rng);
+
+                            // note that there is no cosine factor, because the media is a
+                            // point-like sphere
+                            indirect /= ph_p;
+                            indirect *= medium.phase(&wo, &wi);
+
+                            color += indirect;
+                            // color /= rr_p;
+                        }
+                        color *= medium.transmittence(&ray, h.time, 0.0, rng);
+                        color /= d_pdf;
+                        color
                     }
                 }
+            }
+        } else {
+            match self.get_closest_hit(ray) {
+                None => self.scene.environment.get_color(&ray.dir),
+                Some((h, object)) => {
+                    let world_pos = ray.at(h.time);
+                    let material = object.material;
+                    let wo = -glm::normalize(&ray.dir);
 
-                color
+                    // let rr_p: f64 = rng.gen_range(0.0..1.0);
+                    let mut color = if _num_bounces == 0 {
+                        material.emittance * material.color
+                    } else {
+                        glm::vec3(0.0, 0.0, 0.0)
+                    };
+                    color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
+                    if _num_bounces < self.max_bounces {
+                        if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
+                            let f = material.bsdf(&h.normal, &wo, &wi);
+                            let ray = Ray {
+                                origin: world_pos,
+                                dir:    wi,
+                            };
+                            let indirect = 1.0 / pdf
+                                * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
+                                * wi.dot(&h.normal).abs();
+                            color.x += indirect.x.min(FIREFLY_CLAMP);
+                            color.y += indirect.y.min(FIREFLY_CLAMP);
+                            color.z += indirect.z.min(FIREFLY_CLAMP);
+                            // color /= rr_p;
+                        }
+                    }
+
+                    color
+                }
             }
         }
+    }
+
+    /// Explicitly sample from all the lights in the scene
+    fn sample_lights_for_media(
+        &self,
+        medium: &Medium,
+        pos: &glm::DVec3,
+        wo: &glm::DVec3,
+        rng: &mut StdRng,
+    ) -> Color {
+        let mut color = glm::vec3(0.0, 0.0, 0.0);
+        let scat = medium.scattering(pos);
+        let em = medium.emission(pos);
+        for light in &self.scene.lights {
+            if let Light::Ambient(ambient_color) = light {
+                color += ambient_color.component_mul(&em);
+            } else {
+                let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
+                let ray = Ray {
+                    origin: *pos,
+                    dir:    wi,
+                };
+                let closest_hit = self.get_closest_hit(ray.clone()).map(|(r, _)| r.time);
+
+                if let Some(hit) = closest_hit {
+                    if (hit - dist_to_light).abs() < EPSILON {
+                        // analogue of bsdf
+                        let ph = medium.phase(wo, &wi);
+                        // radiance from the light is scattered and diminished by media
+                        // note that there is no cosine factor
+                        color += scat
+                            * medium.transmittence(&ray, f64::MAX, 0.0, rng)
+                            * &intensity
+                            * scat
+                            * ph;
+                    }
+                }
+            }
+        }
+        color
     }
 
     /// Explicitly sample from all the lights in the scene
@@ -192,15 +332,21 @@ impl<'a> Renderer<'a> {
                 color += ambient_color.component_mul(&material.color());
             } else {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
+                let intensity = intensity;
+                let wi = wi;
+                let dist_to_light = dist_to_light;
                 let closest_hit = self
                     .get_closest_hit(Ray {
                         origin: *pos,
                         dir: wi,
                     })
                     .map(|(r, _)| r.time);
-                if closest_hit.is_none() || closest_hit.unwrap() > dist_to_light {
-                    let f = material.bsdf(n, wo, &wi);
-                    color += f.component_mul(&intensity) * wi.dot(n);
+
+                if let Some(hit) = closest_hit {
+                    if (hit - dist_to_light).abs() < EPSILON {
+                        let f = material.bsdf(n, wo, &wi);
+                        color += f.component_mul(&intensity) * wi.dot(n);
+                    }
                 }
             }
         }
@@ -377,7 +523,7 @@ impl<'a> Renderer<'a> {
                 let diffuse_sum = diffuse.x + diffuse.y + diffuse.z;
                 let specular_sum = specular.x + specular.y + specular.z;
                 let p_d = diffuse_sum / (diffuse_sum + specular_sum) * p_r;
-                let p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
+                let _p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
 
                 // only do diffuse russian rouletter for now (no specular)
                 let russian_roulette: f64 = rng.gen();
