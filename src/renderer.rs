@@ -186,7 +186,7 @@ impl<'a> Renderer<'a> {
                                 let f = material.bsdf(&h.normal, &wo, &wi);
                                 let ray = Ray {
                                     origin: world_pos,
-                                    dir: wi,
+                                    dir:    wi,
                                 };
                                 let indirect = 1.0 / pdf
                                     * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
@@ -218,7 +218,7 @@ impl<'a> Renderer<'a> {
 
                             let new_ray = Ray {
                                 origin: collision,
-                                dir: wi,
+                                dir:    wi,
                             };
 
                             // compute scattered light recursively
@@ -259,7 +259,7 @@ impl<'a> Renderer<'a> {
                             let f = material.bsdf(&h.normal, &wo, &wi);
                             let ray = Ray {
                                 origin: world_pos,
-                                dir: wi,
+                                dir:    wi,
                             };
                             let indirect = 1.0 / pdf
                                 * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
@@ -295,7 +295,7 @@ impl<'a> Renderer<'a> {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
                 let ray = Ray {
                     origin: *pos,
-                    dir: wi,
+                    dir:    wi,
                 };
                 let closest_hit = self.get_closest_hit(ray.clone()).map(|(r, _)| r.time);
 
@@ -338,7 +338,7 @@ impl<'a> Renderer<'a> {
                 let closest_hit = self
                     .get_closest_hit(Ray {
                         origin: *pos,
-                        dir: wi,
+                        dir:    wi,
                     })
                     .map(|(r, _)| r.time);
 
@@ -371,9 +371,9 @@ impl<'a> Renderer<'a> {
 }
 
 struct Photon {
-    pub position: glm::DVec3,
+    pub position:  glm::DVec3,
     pub direction: glm::DVec3,
-    pub power: glm::DVec3,
+    pub power:     glm::DVec3,
 }
 
 impl KdPoint for Photon {
@@ -385,7 +385,64 @@ impl KdPoint for Photon {
 }
 
 /// how many photons to count the contribution of when calculating indirect lighting for a point
-static CLOSEST_N_PHOTONS: usize = 1;
+static CLOSEST_N_PHOTONS: usize = 20;
+static CLOSEST_N_PHOTONS_VOLUME: usize = 100;
+
+#[derive(Default)]
+struct PhotonList(Vec<Photon>, Vec<Photon>);
+impl PhotonList {
+    fn new(surface: Vec<Photon>, volume: Vec<Photon>) -> Self {
+        PhotonList(surface, volume)
+    }
+    fn merge(lists: Vec<Self>) -> Self {
+        let mut out = PhotonList::default();
+        for list in lists {
+            out.0.extend(list.0);
+            out.1.extend(list.1);
+        }
+        out
+    }
+    fn add_surface(&mut self, photon: Photon) {
+        self.0.push(photon)
+    }
+    fn add_volume(&mut self, photon: Photon) {
+        self.1.push(photon)
+    }
+}
+impl std::fmt::Display for PhotonList {
+    // This trait requires `fmt` with this exact signature.
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        // Write strictly the first element into the supplied output
+        // stream: `f`. Returns `fmt::Result` which indicates whether the
+        // operation succeeded or failed. Note that `write!` uses syntax which
+        // is very similar to `println!`.
+        write!(
+            f,
+            "PhotonList(surface: {}, volume: {})",
+            self.0.len(),
+            self.1.len()
+        )
+    }
+}
+
+struct PhotonMap(KdTree<Photon>, KdTree<Photon>);
+impl PhotonMap {
+    fn new(list: PhotonList) -> Self {
+        let surface_map = KdTree::build_by(list.0, |a, b, k| {
+            a.position[k].partial_cmp(&b.position[k]).unwrap()
+        });
+        let volume_map = KdTree::build_by(list.1, |a, b, k| {
+            a.position[k].partial_cmp(&b.position[k]).unwrap()
+        });
+        PhotonMap(surface_map, volume_map)
+    }
+    fn surface(&self) -> &KdTree<Photon> {
+        &self.0
+    }
+    fn volume(&self) -> &KdTree<Photon> {
+        &self.1
+    }
+}
 
 impl<'a> Renderer<'a> {
     /// renders an image using photon mapping
@@ -401,11 +458,11 @@ impl<'a> Renderer<'a> {
         }
 
         println!("Shooting photons");
-        let watts = 1_000.;
+        let watts = 100.;
 
         let pb = ProgressBar::new(photon_count as u64);
         pb.set_draw_rate(1);
-        let mut photon_list: Vec<Photon> = (0..photon_count)
+        let mut photon_list = (0..photon_count)
             .collect::<Vec<_>>()
             .into_par_iter()
             .progress_with(pb)
@@ -413,20 +470,29 @@ impl<'a> Renderer<'a> {
             // shoot photon from a random light
             {
                 let mut rng = StdRng::from_entropy();
-                self.shoot_photon(watts as f64, &mut rng)
+                let power = watts / photon_count as f64;
+                self.shoot_photon(power, &mut rng)
             })
-            .flatten()
-            .collect();
+            .collect::<Vec<_>>();
+        let photon_list = PhotonList::merge(photon_list);
 
-        // scale photons down to distribute the wattage
-        photon_list
-            .iter_mut()
-            .for_each(|p| p.power /= photon_count as f64);
+        println!("{}", photon_list);
+
+        let mut avg = 0.;
+        for p in photon_list.0.iter() {
+            avg += p.power.norm();
+        }
+        avg /= photon_list.0.len() as f64;
+        println!("surface avg: {}", avg);
+        avg = 0.;
+        for p in photon_list.1.iter() {
+            avg += p.power.norm();
+        }
+        avg /= photon_list.1.len() as f64;
+        println!("vol avg: {}", avg);
 
         println!("Building kdtree");
-        let photon_map = KdTree::build_by(photon_list, |a, b, k| {
-            a.position[k].partial_cmp(&b.position[k]).unwrap()
-        });
+        let photon_map = PhotonMap::new(photon_list);
 
         println!("Tracing rays");
         let mut buffer = Buffer::new(self.width, self.height, self.filter);
@@ -448,7 +514,7 @@ impl<'a> Renderer<'a> {
 
     /// shoot a photon from a random light with power `power` and return a list of
     /// photons that have gathered in the scene
-    fn shoot_photon(&self, power: f64, rng: &mut StdRng) -> Vec<Photon> {
+    fn shoot_photon(&self, power: f64, rng: &mut StdRng) -> PhotonList {
         // FIXME: sample random light based on area instead of choosing randomly
         let light_index: usize = rng.gen_range(0..self.scene.lights.len());
         let light = &self.scene.lights[light_index as usize];
@@ -484,7 +550,7 @@ impl<'a> Renderer<'a> {
             let photons = self.trace_photon(
                 Ray {
                     origin: pos,
-                    dir: direction,
+                    dir:    direction,
                 },
                 power * object.material.color() / pdf / pdf_of_sample,
                 rng,
@@ -505,16 +571,62 @@ impl<'a> Renderer<'a> {
         power: glm::DVec3,
         rng: &mut StdRng,
         num_bounces: i32,
-    ) -> Vec<Photon> {
+    ) -> PhotonList {
         match self.get_closest_hit(ray) {
             None => {
                 // no photons if we don't hit a scene element
-                Vec::new()
+                PhotonList::default()
             }
             Some((h, object)) => {
                 let world_pos = ray.at(h.time);
                 let material = object.material;
                 let wo = -glm::normalize(&ray.dir);
+                
+                // do this even if no intersection
+                if self.scene.media.len() > 0 {
+                    let medium = &self.scene.media[0];
+                    // sample distance along ray:
+                    let (d, d_pdf, _d_cdf) = medium.sample_d(&ray, rng);
+                    if d < h.time {
+                        let collision = ray.at(d);
+                        let abs = medium.absorption(&collision);
+                        let emm = medium.emission(&collision);
+                        let scat = medium.scattering(&collision);
+                        let extinction = abs + scat;
+
+                        // TODO: add back d_pdf term
+                        let attenuated_power =
+                            power * medium.transmittence(&ray, d, 0.0, rng); // / d_pdf;
+
+                        let rr_prob = scat / extinction;
+                        let mut next_photons = if rng.gen::<f64>() < rr_prob {
+                            let (wi, ph_p) = medium.sample_ph(&wo, rng);
+
+                            let new_ray = Ray {
+                                origin: collision,
+                                dir:    wi,
+                            };
+                            // compute scattered light recursively
+                            self.trace_photon(
+                                new_ray,
+                                attenuated_power * scat * medium.phase(&wo, &wi) / ph_p / rr_prob,
+                                rng,
+                                num_bounces + 1,
+                            )
+                        } else {
+                            PhotonList::default()
+                        };
+
+                        // add current photon
+                        next_photons.add_volume(Photon {
+                            position:  collision,
+                            direction: wo,
+                            power:     attenuated_power,
+                        });
+
+                        return next_photons;
+                    }
+                }
 
                 // page 16 of siggraph course on photon mapping
                 // let specular = 1. - material.roughness;
@@ -545,7 +657,7 @@ impl<'a> Renderer<'a> {
                         let f = material.bsdf(&h.normal, &wo, &wi);
                         let ray = Ray {
                             origin: world_pos,
-                            dir: wi,
+                            dir:    wi,
                         };
 
                         // account for the chance of terminating
@@ -554,7 +666,7 @@ impl<'a> Renderer<'a> {
                         let russian_roulette_scale_factor = 0.5;
 
                         // gather recursive photons with scaled down power
-                        let mut next_photons: Vec<Photon> = self.trace_photon(
+                        let mut next_photons = self.trace_photon(
                             ray,
                             power.component_mul(&f)
                                 * russian_roulette_scale_factor
@@ -568,7 +680,7 @@ impl<'a> Renderer<'a> {
                         if pdf != 1. {
                             // only add current photon if surface is not specular (pdf of 1)
                             if russian_roulette < p_s {
-                                next_photons.push(Photon {
+                                next_photons.add_surface(Photon {
                                     position: world_pos,
                                     direction: wo,
                                     power,
@@ -579,11 +691,11 @@ impl<'a> Renderer<'a> {
                         next_photons
                     } else {
                         // total internal reflection: no photons
-                        Vec::new()
+                        PhotonList::default()
                     }
                 } else {
                     // absorbed
-                    Vec::new()
+                    PhotonList::default()
                 }
             }
         }
@@ -596,7 +708,7 @@ impl<'a> Renderer<'a> {
         x: u32,
         y: u32,
         rng: &mut StdRng,
-        photon_map: &KdTree<Photon>,
+        photon_map: &PhotonMap,
     ) -> Color {
         let dim = std::cmp::max(self.width, self.height) as f64;
         let xn = ((2 * x + 1) as f64 - self.width as f64) / dim;
@@ -623,14 +735,64 @@ impl<'a> Renderer<'a> {
         ray: Ray,
         num_bounces: u32,
         rng: &mut StdRng,
-        photon_map: &KdTree<Photon>,
+        photon_map: &PhotonMap,
     ) -> Color {
         match self.get_closest_hit(ray) {
             None => self.scene.environment.get_color(&ray.dir),
             Some((h, object)) => {
-                let world_pos = ray.at(h.time);
+                let mut world_pos = ray.at(h.time);
                 let material = object.material;
                 let wo = -glm::normalize(&ray.dir);
+
+                if self.scene.media.len() > 0 {
+                    // TODO: this should be intersection tests with a bounded mesh of media
+                    let medium = &self.scene.media[0];
+                    let (d, d_pdf, _d_cdf) = medium.sample_d(&ray, rng);
+                    if d < h.time {
+                        let collision = ray.at(d);
+                        let abs = medium.absorption(&collision);
+                        let emm = medium.emission(&collision);
+                        let scat = medium.scattering(&collision);
+                        let extinction = abs + scat;
+
+                        let mut color = Color::new(0., 0., 0.);
+
+                        // direct lighting for media particle
+                        // color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
+
+                        // estimate indirect lighting via photon map
+                        let near_photons = photon_map
+                            .volume()
+                            .nearests(&[collision.x, collision.y, collision.z], CLOSEST_N_PHOTONS_VOLUME);
+
+                        let max_dist_squared = near_photons
+                            .iter()
+                            .map(
+                                |ItemAndDistance {
+                                     squared_distance, ..
+                                 }| { squared_distance },
+                            )
+                            .fold(0., |acc: f64, &p: &f64| acc.max(p));
+                        
+                        for ItemAndDistance {
+                            item: photon,
+                            squared_distance: _,
+                        } in near_photons
+                        {
+                            color += photon.power * medium.phase(&wo, &photon.direction);
+                        }
+                        color /= (4. / 3.) * glm::pi::<f64>() * max_dist_squared.powf(1.5);
+                        // color /= extinction;
+
+                        color *= medium.transmittence(&ray, d, 0.0, rng);
+                        color /= d_pdf;
+
+                        // if max_dist_squared > 0.1 {
+                        //     color = Color::new(0., 0., 0.);
+                        // }
+                        return color;
+                    }
+                }
 
                 if material.is_mirror() {
                     if num_bounces > 100 {
@@ -640,7 +802,7 @@ impl<'a> Renderer<'a> {
                         self.trace_ray_with_photon_map(
                             Ray {
                                 origin: world_pos,
-                                dir: wi,
+                                dir:    wi,
                             },
                             num_bounces + 1,
                             rng,
@@ -652,6 +814,7 @@ impl<'a> Renderer<'a> {
                     }
                 } else {
                     let near_photons = photon_map
+                        .surface()
                         .nearests(&[world_pos.x, world_pos.y, world_pos.z], CLOSEST_N_PHOTONS);
 
                     // of the nearest photons, how far away is the furthest one?
@@ -680,6 +843,12 @@ impl<'a> Renderer<'a> {
 
                     // normalize by (1/(pi * r^2))
                     color = color * (1. / (glm::pi::<f64>() * max_dist_squared));
+
+                    // TODO: divide by probability of sampling behind surface
+
+                    // if max_dist_squared > 0.01 {
+                    //     color = Color::new(0., 0., 0.);
+                    // }
 
                     // direct lighting via light sampling
                     // color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);

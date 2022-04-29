@@ -1,4 +1,5 @@
-//! This is an example of a standard Cornell box, for testing global illumination
+//! This is an example of a standard Cornell box, for testing volumetric global illumination
+//! with participating media
 //!
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
@@ -21,8 +22,6 @@ fn main() -> color_eyre::Result<()> {
     };
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
-    let gloss = Material::specular(hex_color(0xBC0000), 2.0);
-    let mirror = Material::mirror();
     let red = Material::diffuse(hex_color(0xBC0000));
     let green = Material::diffuse(hex_color(0x00BC00));
     let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
@@ -68,10 +67,10 @@ fn main() -> color_eyre::Result<()> {
         .scale(&glm::vec3(165.0, 330.0, 165.0))
         .rotate_y(glm::two_pi::<f64>() * (-253.0 / 360.0))
         .translate(&glm::vec3(368.0, 165.0, 351.0));
-    let small_box = sphere()
-        .scale(&glm::vec3(80.0, 80.0, 80.0))
+    let small_box = cube()
+        .scale(&glm::vec3(165.0, 165.0, 165.0))
         .rotate_y(glm::two_pi::<f64>() * (-197.0 / 360.0))
-        .translate(&glm::vec3(150.0, 82.5, 450.0));
+        .translate(&glm::vec3(185.0, 82.5, 169.0));
 
     scene.add(Object::new(floor).material(white));
     scene.add(Object::new(ceiling).material(white));
@@ -82,28 +81,19 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(small_box).material(white));
     scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    let mut time = Instant::now();
-    fs::create_dir_all("results/")?;
-    Renderer::new(&scene, camera)
-        .width(512)
-        .height(512)
-        .filter(Filter::Box(1))
-        .max_bounces(2)
-        .num_samples(500)
-        .iterative_render(10, |iteration, buffer| {
-            let millis = time.elapsed().as_millis();
-            println!(
-                "Finished iteration {}, took {} ms, variance: {}",
-                iteration,
-                millis,
-                buffer.variance()
-            );
-            buffer
-                .image()
-                .save(format!("results/output_{:03}.png", iteration - 1))
-                .expect("Failed to save image");
-            time = Instant::now();
-        });
+    scene.add(Medium::homogeneous_isotropic(0.0002, 0.002)); // foggy
 
+
+    let image = Renderer::new(&scene, camera)
+        .width(1024)
+        .height(1024)
+        // .filter(Filter::Box(1))
+        .max_bounces(4)
+        .num_samples(140)
+        .photon_map_render(1_000_000);
+
+    image
+        .save(format!("output7.png"))
+        .expect("Failed to save image");
     Ok(())
 }

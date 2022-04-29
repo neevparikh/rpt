@@ -66,8 +66,8 @@ fn main() -> color_eyre::Result<()> {
         .height(800)
         .max_bounces(4)
         .num_samples(10)
-        .render()
-        .save("output.png")?;
+        .photon_map_render(10_000_000, 10)
+        .save("photon_ferris.png")?;
 
     Ok(())
 }

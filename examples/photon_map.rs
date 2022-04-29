@@ -21,6 +21,8 @@ fn main() -> color_eyre::Result<()> {
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let gloss = Material::specular(hex_color(0xAA0000), 2.0);
+    let mirror = Material::mirror();
+    let transmissive = Material::transmissive(2.5);
     let red = Material::diffuse(hex_color(0xBC0000));
     let green = Material::diffuse(hex_color(0x00BC00));
     let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
@@ -62,6 +64,9 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 0.0),
     ]);
 
+    let mirror_sphere = sphere()
+        .scale(&glm::vec3(100., 100., 100.))
+        .translate(&glm::vec3(185.0, 82.5, 169.0));
     let large_box = cube()
         .scale(&glm::vec3(165.0, 330.0, 165.0))
         .rotate_y(glm::two_pi::<f64>() * (-253.0 / 360.0))
@@ -69,14 +74,15 @@ fn main() -> color_eyre::Result<()> {
     let small_box = cube()
         .scale(&glm::vec3(165.0, 165.0, 165.0))
         .rotate_y(glm::two_pi::<f64>() * (-197.0 / 360.0))
-        .translate(&glm::vec3(185.0, 82.5, 169.0));
+        .translate(&glm::vec3(400., 82., 300.));
 
     scene.add(Object::new(floor).material(white));
     scene.add(Object::new(ceiling).material(white));
     scene.add(Object::new(back_wall).material(white));
     scene.add(Object::new(left_wall).material(red));
     scene.add(Object::new(right_wall).material(green));
-    scene.add(Object::new(large_box).material(white));
+    // scene.add(Object::new(large_box).material(white));
+    scene.add(Object::new(mirror_sphere).material(transmissive));
     scene.add(Object::new(small_box).material(white));
     scene.add(Light::Object(Object::new(light_rect).material(light_mtl)));
 

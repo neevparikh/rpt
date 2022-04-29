@@ -73,14 +73,14 @@ impl Medium {
             absorption: Box::new(move |_| absorption),
             scattering: Box::new(move |_| scattering),
             emission:   Box::new(move |_| hex_color(0x808080)),
-            phase:      Box::new(move |_, _| 1.0 / 4.0 * glm::pi::<f64>()),
+            phase:      Box::new(move |_, _| 1.0 / (4.0 * glm::pi::<f64>())),
             sample_ph:  Box::new(move |_, rng| {
                 let wo = glm::vec3(
                     rng.gen_range(-1.0..1.0),
                     rng.gen_range(-1.0..1.0),
                     rng.gen_range(-1.0..1.0),
                 );
-                (glm::normalize(&wo), 1.0 / 4.0 * glm::pi::<f64>())
+                (glm::normalize(&wo), 1.0 / (4.0 * glm::pi::<f64>()))
             }),
         }
     }
@@ -113,7 +113,10 @@ impl Medium {
 impl Medium {
     /// Returns transmittence along ray up to t_max
     pub fn transmittence(&self, ray: &Ray, t_max: f64, step: f64, rng: &mut StdRng) -> f64 {
-        rng.gen_range(0.0..1.0)
+        let absorption = self.absorption(&ray.origin);
+        let scattering = self.scattering(&ray.origin);
+        let extinction = absorption + scattering;
+        (-extinction * t_max).exp()
     }
 
     /// Sample distance along a ray, return distance y and pdf(y)
@@ -126,9 +129,9 @@ impl Medium {
         let extinction = absorption + scattering;
 
         // analytic
-        let transmittence = random;
         let dist = -f64::ln(random) / extinction;
-        let pdf = extinction * transmittence;
+        let transmittence = self.transmittence(ray, dist, 0., rng);
+        let pdf =  extinction * transmittence;
         let cdf = 1.0 - transmittence;
 
         (dist, pdf, cdf)

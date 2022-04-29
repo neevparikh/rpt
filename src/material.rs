@@ -55,6 +55,14 @@ impl Material {
         Self::Mirror
     }
 
+    /// Creates a transmissive material
+    pub fn transmissive(ior: f64) -> Material {
+        Self::Transmissive {
+            ior,
+            albedo: Color::new(0., 0., 0.)
+        }
+    }
+
     /// Clear material with a specified index of refraction and roughness (such as glass)
     pub fn clear(index: f64, roughness: f64) -> Self {
         Self::Transmissive {
@@ -122,30 +130,31 @@ impl Material {
     pub fn is_mirror(&self) -> bool {
         match self {
             Self::Mirror => true,
+            Self::Transmissive {..} => true,
             _ => false
         }
     }
 }
 
-// fn snell_solve() -> f64 {
-//     (1. - (ni / nt).powi(2) * (1. - cos_theta_i.powi(2))).sqrt()
-// }
+fn snell_solve(ni: f64, nt: f64, cos_theta_i: f64) -> f64 {
+    (1. - (ni / nt).powi(2) * (1. - cos_theta_i.powi(2))).sqrt()
+}
 
-// fn refract_ray(
-//     ni: f64,
-//     nt: f64,
-//     w_i: glm::DVec3,
-//     cos_theta_i: f64,
-//     cos_theta_t: f64,
-//     normal: glm::DVec3,
-// ) -> glm::DVec3 {
-//     (ni / nt) * (-w_i) + ((ni / nt) * cost_theta_i - cos_theta_t) * normal
-// }
+fn refract_ray(
+    ni: f64,
+    nt: f64,
+    w_i: glm::DVec3,
+    cos_theta_i: f64,
+    cos_theta_t: f64,
+    normal: glm::DVec3,
+) -> glm::DVec3 {
+    (ni / nt) * (-w_i) + ((ni / nt) * cos_theta_i - cos_theta_t) * normal
+}
 
-// fn schlick(ni: f64, nt: f64, cos_theta_i) -> f64 {
-//     let r0: f64= ((ni - nt) / (ni + nt)).powi(2);
-//     r0 + (1. - r0) * (1 - cos_theta_i).powi(5)
-// }
+fn schlick(ni: f64, nt: f64, cos_theta_i: f64) -> f64 {
+    let r0: f64= ((ni - nt) / (ni + nt)).powi(2);
+    r0 + (1. - r0) * (1. - cos_theta_i).powi(5)
+}
 
 impl Material {
     /// sample a bounce direction
@@ -206,44 +215,47 @@ impl Material {
             }
             &Self::Mirror => Some((-glm::reflect_vec(wo, &normal.normalize()), 1.)),
             &Self::Transmissive { ior, .. } => {
-                // let inside = normal.dot(wo) < 0.;
-                // let cos_theta_i = wo.dot(&if inside { -normal } else { *normal }).clamp(0., 1.);
-                // let ni = outgoing_ray.ior;
-                // let nt = next_ior(outgoing_ray);
 
-                // let schlick_ratio = schlick(ni, nt, cos_theta_i).clamp(0.0, 1.0);
+                // Estimate specular contribution using Fresnel term
+                // let f0 = ((self.ior - 1.0) / (self.ior + 1.0)).powi(2);
+                // let f = (1.0 - self.metallic) * f0 + self.metallic * self.color.mean();
+                // let f = glm::mix_scalar(f, 1.0, 0.2);
 
-                // if rng.gen::<f64>() < schlick_ratio {
-                //     let reflected = glm::reflect_vec(&wo, &normal);
+                let inside = normal.dot(wo) < 0.;
+                let cos_theta_i = wo.dot(&if inside { -normal } else { *normal }).clamp(0., 1.);
+                let (ni, nt) = if inside {
+                    (ior, 1.0)
+                } else {
+                    (1.0, ior)
+                };
 
-                //     // set return values
-                //     Some((reflected, 1.))
-                // } else {
-                //     let cos_theta_t = snell_solve(ni, nt, cos_theta_i);
+                let schlick_ratio = schlick(ni, nt, cos_theta_i).clamp(0.0, 1.0);
 
-                //     if cos_theta_t.is_nan() {
-                //         // HACK: if result of solving for cos_theta_t is NaN, then we
-                //         // have total internal reflection. Rather than special casing
-                //         // the return type for this, we simply bounce the ray back the
-                //         // direction it came with a very high pdf. Since we divide by
-                //         // the pdf, the resultant light value will be very small, as if
-                //         // no light had been reflected at all, which is what we want to
-                //         // simulate total internal reflection.
-                //         None
-                //     } else {
-                //         let refracted = refract_ray(
-                //             ni,
-                //             nt,
-                //             *wo,
-                //             cos_theta_i,
-                //             cos_theta_t,
-                //             if inside { -normal } else { normal },
-                //         );
+                if rng.gen::<f64>() < schlick_ratio {
+                    let reflected = -glm::reflect_vec(&wo, &normal);
 
-                //         Some((refracted, 1.))
-                //     }
-                // }
-                todo!()
+                    // set return values
+                    Some((reflected, 1.))
+                } else {
+                    let cos_theta_t = snell_solve(ni, nt, cos_theta_i);
+
+                    if cos_theta_t.is_nan() {
+                        // if result of solving for cos_theta_t is NaN, then we
+                        // have total internal reflection
+                        None
+                    } else {
+                        let refracted = refract_ray(
+                            ni,
+                            nt,
+                            *wo,
+                            cos_theta_i,
+                            cos_theta_t,
+                            if inside { -normal } else { *normal },
+                        );
+
+                        Some((refracted, 1.))
+                    }
+                }
             }
         }
     }
@@ -263,7 +275,7 @@ impl Material {
             }
             &Self::Mirror => glm::vec3(1., 1., 1.),
             &Self::Transmissive { .. } => {
-                todo!()
+                glm::vec3(1., 1., 1.)
             }
         }
     }

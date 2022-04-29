@@ -2,7 +2,6 @@
 //!
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
-use std::fs;
 use std::time::Instant;
 
 use rpt::*;
@@ -64,31 +63,35 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 0.0),
     ]);
 
+    let mirror_sphere = sphere()
+        .scale(&glm::vec3(100., 100., 100.))
+        .translate(&glm::vec3(400., 82., 300.));
     let large_box = cube()
         .scale(&glm::vec3(165.0, 330.0, 165.0))
         .rotate_y(glm::two_pi::<f64>() * (-253.0 / 360.0))
         .translate(&glm::vec3(368.0, 165.0, 351.0));
-    let small_box = sphere()
-        .scale(&glm::vec3(80.0, 80.0, 80.0))
+    let small_box = cube()
+        .scale(&glm::vec3(165., 165., 165.))
         .rotate_y(glm::two_pi::<f64>() * (-197.0 / 360.0))
-        .translate(&glm::vec3(150.0, 82.5, 450.0));
+        .translate(&glm::vec3(180.0, 82.5, 160.0));
 
     scene.add(Object::new(floor).material(white));
     scene.add(Object::new(ceiling).material(white));
     scene.add(Object::new(back_wall).material(white));
     scene.add(Object::new(left_wall).material(red));
     scene.add(Object::new(right_wall).material(green));
-    scene.add(Object::new(large_box).material(white));
+    // scene.add(Object::new(large_box).material(mirror));
+    scene.add(Object::new(mirror_sphere).material(mirror));
     scene.add(Object::new(small_box).material(white));
-    scene.add((light_rect, light_mtl)); // add light and object at the same time
+    scene.add(Light::Object(Object::new(light_rect.clone()).material(light_mtl)));
+    scene.add(Object::new(light_rect).material(light_mtl));
 
     let mut time = Instant::now();
-    fs::create_dir_all("results/")?;
     Renderer::new(&scene, camera)
         .width(512)
         .height(512)
         .filter(Filter::Box(1))
-        .max_bounces(2)
+        .max_bounces(5)
         .num_samples(500)
         .iterative_render(10, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
@@ -100,7 +103,7 @@ fn main() -> color_eyre::Result<()> {
             );
             buffer
                 .image()
-                .save(format!("results/output_{:03}.png", iteration - 1))
+                .save(format!("output_{:03}.png", iteration - 1))
                 .expect("Failed to save image");
             time = Instant::now();
         });
