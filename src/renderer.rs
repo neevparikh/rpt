@@ -47,6 +47,10 @@ pub struct Renderer<'a> {
 
     /// Number of random paths traced per pixel
     pub num_samples: u32,
+
+    gather_size: usize,
+
+    gather_size_volume: usize,
 }
 
 impl<'a> Renderer<'a> {
@@ -62,6 +66,8 @@ impl<'a> Renderer<'a> {
             stepsize: 0.0,
             max_bounces: 0,
             num_samples: 1,
+            gather_size: 50,
+            gather_size_volume: 50,
         }
     }
 
@@ -104,6 +110,18 @@ impl<'a> Renderer<'a> {
     /// Set the number of random paths traced per pixel
     pub fn num_samples(mut self, num_samples: u32) -> Self {
         self.num_samples = num_samples;
+        self
+    }
+
+    /// Set the number of photons that are counted in the final gather step when on a surface
+    pub fn gather_size(mut self, gather_size: usize) -> Self {
+        self.gather_size = gather_size;
+        self
+    }
+
+    /// Set the number of photons that are counted in the final gather step when in a volume
+    pub fn gather_size_volume(mut self, gather_size_volume: usize) -> Self {
+        self.gather_size_volume = gather_size_volume;
         self
     }
 
@@ -384,10 +402,6 @@ impl KdPoint for Photon {
     }
 }
 
-/// how many photons to count the contribution of when calculating indirect lighting for a point
-static CLOSEST_N_PHOTONS: usize = 20;
-static CLOSEST_N_PHOTONS_VOLUME: usize = 100;
-
 #[derive(Default)]
 struct PhotonList(Vec<Photon>, Vec<Photon>);
 impl PhotonList {
@@ -572,61 +586,62 @@ impl<'a> Renderer<'a> {
         rng: &mut StdRng,
         num_bounces: i32,
     ) -> PhotonList {
-        match self.get_closest_hit(ray) {
-            None => {
-                // no photons if we don't hit a scene element
-                PhotonList::default()
+        let surface_hit = self.get_closest_hit(ray);
+
+        if self.scene.media.len() > 0 {
+            let medium = &self.scene.media[0];
+            let (d, d_pdf, _d_cdf) = medium.sample_d(&ray, rng);
+
+            // if the sampled distance is less than the distance to the surface (or no surface
+            // exists) then bounce a photon in the medium
+            if surface_hit.as_ref().is_none() || d < surface_hit.as_ref().unwrap().0.time {
+                let wo = -glm::normalize(&ray.dir);
+
+                let collision = ray.at(d);
+                let abs = medium.absorption(&collision);
+                let emm = medium.emission(&collision);
+                let scat = medium.scattering(&collision);
+                let extinction = abs + scat;
+
+                // TODO: add back d_pdf term
+                let attenuated_power = power * medium.transmittence(&ray, d, 0.0, rng); // / d_pdf;
+
+                let rr_prob = scat / extinction;
+                let mut next_photons = if rng.gen::<f64>() < rr_prob {
+                    let (wi, ph_p) = medium.sample_ph(&wo, rng);
+
+                    let new_ray = Ray {
+                        origin: collision,
+                        dir:    wi,
+                    };
+                    // compute scattered light recursively
+                    self.trace_photon(
+                        new_ray,
+                        attenuated_power * scat * medium.phase(&wo, &wi) / ph_p / rr_prob,
+                        rng,
+                        num_bounces + 1,
+                    )
+                } else {
+                    PhotonList::default()
+                };
+
+                // add current photon
+                next_photons.add_volume(Photon {
+                    position:  collision,
+                    direction: wo,
+                    power:     attenuated_power,
+                });
+
+                return next_photons;
             }
+        }
+
+        match surface_hit {
+            None => PhotonList::default(),
             Some((h, object)) => {
                 let world_pos = ray.at(h.time);
                 let material = object.material;
                 let wo = -glm::normalize(&ray.dir);
-                
-                // do this even if no intersection
-                if self.scene.media.len() > 0 {
-                    let medium = &self.scene.media[0];
-                    // sample distance along ray:
-                    let (d, d_pdf, _d_cdf) = medium.sample_d(&ray, rng);
-                    if d < h.time {
-                        let collision = ray.at(d);
-                        let abs = medium.absorption(&collision);
-                        let emm = medium.emission(&collision);
-                        let scat = medium.scattering(&collision);
-                        let extinction = abs + scat;
-
-                        // TODO: add back d_pdf term
-                        let attenuated_power =
-                            power * medium.transmittence(&ray, d, 0.0, rng); // / d_pdf;
-
-                        let rr_prob = scat / extinction;
-                        let mut next_photons = if rng.gen::<f64>() < rr_prob {
-                            let (wi, ph_p) = medium.sample_ph(&wo, rng);
-
-                            let new_ray = Ray {
-                                origin: collision,
-                                dir:    wi,
-                            };
-                            // compute scattered light recursively
-                            self.trace_photon(
-                                new_ray,
-                                attenuated_power * scat * medium.phase(&wo, &wi) / ph_p / rr_prob,
-                                rng,
-                                num_bounces + 1,
-                            )
-                        } else {
-                            PhotonList::default()
-                        };
-
-                        // add current photon
-                        next_photons.add_volume(Photon {
-                            position:  collision,
-                            direction: wo,
-                            power:     attenuated_power,
-                        });
-
-                        return next_photons;
-                    }
-                }
 
                 // page 16 of siggraph course on photon mapping
                 // let specular = 1. - material.roughness;
@@ -761,9 +776,10 @@ impl<'a> Renderer<'a> {
                         // color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
 
                         // estimate indirect lighting via photon map
-                        let near_photons = photon_map
-                            .volume()
-                            .nearests(&[collision.x, collision.y, collision.z], CLOSEST_N_PHOTONS_VOLUME);
+                        let near_photons = photon_map.volume().nearests(
+                            &[collision.x, collision.y, collision.z],
+                            self.gather_size_volume,
+                        );
 
                         let max_dist_squared = near_photons
                             .iter()
@@ -773,7 +789,7 @@ impl<'a> Renderer<'a> {
                                  }| { squared_distance },
                             )
                             .fold(0., |acc: f64, &p: &f64| acc.max(p));
-                        
+
                         for ItemAndDistance {
                             item: photon,
                             squared_distance: _,
@@ -815,7 +831,7 @@ impl<'a> Renderer<'a> {
                 } else {
                     let near_photons = photon_map
                         .surface()
-                        .nearests(&[world_pos.x, world_pos.y, world_pos.z], CLOSEST_N_PHOTONS);
+                        .nearests(&[world_pos.x, world_pos.y, world_pos.z], self.gather_size);
 
                     // of the nearest photons, how far away is the furthest one?
                     let max_dist_squared = near_photons
