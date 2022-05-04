@@ -169,7 +169,7 @@ impl Material {
                 let r1: f64 = rng.gen();
                 let r2: f64 = rng.gen();
                 let phi = 2. * glm::pi::<f64>() * r1;
-                let theta = r2.sqrt().cos();
+                let theta = r2.sqrt().acos();
                 let pdf_of_sample = theta.cos() / glm::pi::<f64>();
                 let random_hemisphere_dir = glm::vec3(
                     theta.sin() * phi.cos(),
@@ -262,6 +262,14 @@ impl Material {
 
     /// calculate brdf
     pub fn bsdf(&self, normal: &glm::DVec3, wo: &glm::DVec3, wi: &glm::DVec3) -> Color {
+        let n_dot_wi = normal.dot(wi);
+        let n_dot_wo = normal.dot(wo);
+        let wi_outside = n_dot_wi.is_sign_positive();
+        let wo_outside = n_dot_wo.is_sign_positive();
+        if !wi_outside || !wo_outside {
+            return glm::vec3(0.0, 0.0, 0.0);
+        }
+
         match self {
             &Self::Lambertian { albedo, .. } => glm::one_over_pi::<f64>() * albedo,
             &Self::Phong {
