@@ -2,7 +2,7 @@ use crate::environment::Environment;
 use crate::light::Light;
 use crate::medium::Medium;
 use crate::object::Object;
-use crate::{Material, Mesh};
+use crate::{Material, Mesh, Transformed};
 
 /// Type for adding light and object at the same time
 pub type LightAndMeshObject = (Mesh, Material);
@@ -56,6 +56,16 @@ impl SceneAdd<Light> for Scene {
 /// option 2 -> add them separately, conform to existing abstraction
 impl SceneAdd<LightAndMeshObject> for Scene {
     fn add(&mut self, m: LightAndMeshObject) {
+        let (mesh, material) = m;
+        let obj = Object::new(mesh.clone()).material(material);
+        let light = Light::Object(Object::new(mesh.clone()).material(material));
+        self.add(obj);
+        self.add(light);
+    }
+}
+
+impl SceneAdd<(Transformed<Mesh>, Material)> for Scene {
+    fn add(&mut self, m: (Transformed<Mesh>, Material)) {
         let (mesh, material) = m;
         let obj = Object::new(mesh.clone()).material(material);
         let light = Light::Object(Object::new(mesh.clone()).material(material));

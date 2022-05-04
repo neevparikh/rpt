@@ -3,7 +3,7 @@
 //!
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
-use std::fs;
+use std::fs::{self, File};
 use std::time::Instant;
 
 use rpt::*;
@@ -11,6 +11,14 @@ use rpt::*;
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
+    for i in 0..30 {
+        f(i);
+    }
+
+    Ok(())
+}
+
+fn f(i: i32) -> color_eyre::Result<()> {
     let mut scene = Scene::new();
 
     let camera = Camera {
@@ -43,7 +51,19 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(343.0, 548.8, 332.0),
         glm::vec3(213.0, 548.8, 332.0),
         glm::vec3(213.0, 548.8, 227.0),
-    ]);
+    ])
+    .translate(&glm::vec3(0.0, 0.0, 0.0))
+    .rotate(3.14159265 / 2., &glm::vec3(1.0, 0.0, 0.0))
+    .translate(&glm::vec3(0., -10., 0.));
+
+    let percent = i as f64 / 30.;
+    let rads = percent * 2. * 3.14159265;
+
+    let x = 100. * rads.sin() + 300.;
+    let y = 100. * rads.cos() + 400.;
+
+    let light_rect = load_obj(File::open("examples/cube.obj")?)?.translate(&glm::vec3(x, y, 227.0));
+
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
@@ -81,11 +101,11 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(small_box).material(white));
     scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    let absorb = 0.0002;
-    let scat = 0.0002;
-    let size = 512;
+    let absorb = 0.00008;
+    let scat = 0.00008;
+    let size = 256;
     let bounce = 10;
-    let sample = 300;
+    let sample = 500;
     let photons = 1_000_000;
     let gather_size = 200;
     let gather_size_volume = 100;
@@ -104,9 +124,10 @@ fn main() -> color_eyre::Result<()> {
 
     image
         .save(format!(
-            "vpm/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
-            size, bounce, sample, photons, 100, gather_size, gather_size_volume, absorb, scat
+            "vpm/sphere/{}_{}_{}_{}_{}_{}_{}_{}_{}_{:0>3}.png",
+            size, bounce, sample, photons, 100, gather_size, gather_size_volume, absorb, scat, i
         ))
         .expect("Failed to save image");
+
     Ok(())
 }

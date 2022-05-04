@@ -23,8 +23,9 @@ fn main() -> color_eyre::Result<()> {
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
+    let yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
+    let light_mtl = Material::light(hex_color(0xFFFEFA), 120.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -38,12 +39,41 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
     ]);
+
     let light_rect = polygon(&[
         glm::vec3(343.0, 548.8, 227.0),
         glm::vec3(343.0, 548.8, 332.0),
         glm::vec3(213.0, 548.8, 332.0),
         glm::vec3(213.0, 548.8, 227.0),
     ]);
+
+    let shift = glm::vec3(0.0, 70.0, 0.0);
+
+    let front_shade = polygon(&[
+        glm::vec3(343.0, 548.99, 227.0) - shift,
+        glm::vec3(343.0, 548.99, 332.0) - shift,
+        glm::vec3(343.0, 548.99, 332.0),
+        glm::vec3(343.0, 548.99, 227.0),
+    ]);
+    let left_shade = polygon(&[
+        glm::vec3(343.0, 548.99, 332.0) - shift,
+        glm::vec3(213.0, 548.99, 332.0) - shift,
+        glm::vec3(213.0, 548.99, 332.0),
+        glm::vec3(343.0, 548.99, 332.0),
+    ]);
+    let back_shade = polygon(&[
+        glm::vec3(213.0, 548.99, 332.0) - shift,
+        glm::vec3(213.0, 548.99, 227.0) - shift,
+        glm::vec3(213.0, 548.99, 227.0),
+        glm::vec3(213.0, 548.99, 332.0),
+    ]);
+    let right_shade = polygon(&[
+        glm::vec3(213.0, 548.99, 227.0) - shift,
+        glm::vec3(343.0, 548.99, 227.0) - shift,
+        glm::vec3(343.0, 548.99, 227.0),
+        glm::vec3(213.0, 548.99, 227.0),
+    ]);
+
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
@@ -79,16 +109,22 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(right_wall).material(green));
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
-    scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    let absorb = 0.0002;
-    let scat = 0.0002;
-    let size = 512;
+    scene.add(Object::new(right_shade).material(yellow));
+    scene.add(Object::new(left_shade).material(yellow));
+    scene.add(Object::new(front_shade).material(yellow));
+    scene.add(Object::new(back_shade).material(yellow));
+
+    scene.add((light_rect, light_mtl));
+
+    let absorb = 0.0001;
+    let scat = 0.0001;
+    let size = 256;
     let bounce = 10;
-    let sample = 300;
+    let sample = 200;
     let photons = 1_000_000;
     let gather_size = 200;
-    let gather_size_volume = 100;
+    let gather_size_volume = 30;
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
@@ -104,7 +140,7 @@ fn main() -> color_eyre::Result<()> {
 
     image
         .save(format!(
-            "vpm/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            "vpm/lamp/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
             size, bounce, sample, photons, 100, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");
