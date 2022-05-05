@@ -23,7 +23,7 @@ fn main() -> color_eyre::Result<()> {
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
-    let yellow = Material::diffuse(hex_color(0xBCBC00));
+    let yellow = Material::diffuse(hex_color(0x34EB7A));
     let green = Material::diffuse(hex_color(0x00BC00));
     let light_mtl = Material::light(hex_color(0xFFFEFA), 120.0); // 6500 K
 
@@ -117,17 +117,17 @@ fn main() -> color_eyre::Result<()> {
 
     scene.add((light_rect, light_mtl));
 
-    scene.add(Medium::homogeneous_isotropic(0.0001, 0.001)); // foggy
+    scene.add(Medium::homogeneous_isotropic(0.00002, 0.0002)); // foggy
 
     let mut time = Instant::now();
     fs::create_dir_all("volumetric_results/")?;
     Renderer::new(&scene, camera)
-        .width(1024)
-        .height(1024)
+        .width(512)
+        .height(512)
         .filter(Filter::Box(1))
         .max_bounces(4)
-        .num_samples(1000)
-        .iterative_render(200, |iteration, buffer| {
+        .num_samples(2000)
+        .iterative_render(100, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",

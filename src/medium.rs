@@ -113,10 +113,9 @@ impl Medium {
 impl Medium {
     /// Returns transmittence along ray up to t_max
     pub fn transmittence(&self, ray: &Ray, t_max: f64, step: f64, rng: &mut StdRng) -> f64 {
-        let absorption = self.absorption(&ray.origin);
-        let scattering = self.scattering(&ray.origin);
-        let extinction = absorption + scattering;
-        (-extinction * t_max).exp()
+        let extinction = self.extinction(&ray.origin);
+        let optical_thickness = extinction * t_max;
+        (-optical_thickness).exp()
     }
 
     /// Sample distance along a ray, return distance y and pdf(y)
@@ -124,14 +123,12 @@ impl Medium {
         let random = rng.gen_range(0.0..1.0);
 
         // homogeneous
-        let absorption = self.absorption(&ray.origin);
-        let scattering = self.scattering(&ray.origin);
-        let extinction = absorption + scattering;
+        let extinction = self.extinction(&ray.origin);
 
         // analytic
         let dist = -f64::ln(random) / extinction;
-        let transmittence = self.transmittence(ray, dist, 0., rng);
-        let pdf =  extinction * transmittence;
+        let transmittence = self.transmittence(ray, dist, 0.0, rng);
+        let pdf = extinction * transmittence;
         let cdf = 1.0 - transmittence;
 
         (dist, pdf, cdf)
