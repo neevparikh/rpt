@@ -25,7 +25,7 @@ fn main() -> color_eyre::Result<()> {
     let red = Material::diffuse(hex_color(0xBC0000));
     let yellow = Material::diffuse(hex_color(0x34EB7A));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 120.0); // 6500 K
+    let light_mtl = Material::light(hex_color(0xFFFEFA), 20.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -117,10 +117,10 @@ fn main() -> color_eyre::Result<()> {
 
     scene.add((light_rect, light_mtl));
 
-    scene.add(Medium::homogeneous_isotropic(0.00002, 0.0002)); // foggy
+    scene.add(Medium::homogeneous_isotropic(0.00005, 0.0005)); // foggy
 
-    let mut time = Instant::now();
     fs::create_dir_all("volumetric_results/")?;
+    let mut time = Instant::now();
     Renderer::new(&scene, camera)
         .width(512)
         .height(512)
