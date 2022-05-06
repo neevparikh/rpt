@@ -53,6 +53,8 @@ pub struct Renderer<'a> {
     gather_size: usize,
 
     gather_size_volume: usize,
+
+    watts: f64,
 }
 
 impl<'a> Renderer<'a> {
@@ -70,6 +72,7 @@ impl<'a> Renderer<'a> {
             num_samples: 1,
             gather_size: 50,
             gather_size_volume: 50,
+            watts: 100.,
         }
     }
 
@@ -124,6 +127,11 @@ impl<'a> Renderer<'a> {
     /// Set the number of photons that are counted in the final gather step when in a volume
     pub fn gather_size_volume(mut self, gather_size_volume: usize) -> Self {
         self.gather_size_volume = gather_size_volume;
+        self
+    }
+
+    pub fn watts(mut self, watts: f64) -> Self {
+        self.watts = watts;
         self
     }
 
@@ -514,7 +522,6 @@ impl<'a> Renderer<'a> {
         }
 
         println!("Shooting photons");
-        let watts = 100.;
 
         let pb = ProgressBar::new(photon_count as u64);
         pb.set_draw_rate(1);
@@ -526,7 +533,7 @@ impl<'a> Renderer<'a> {
             // shoot photon from a random light
             {
                 let mut rng = StdRng::from_entropy();
-                let power = watts / photon_count as f64;
+                let power = self.watts / photon_count as f64;
                 self.shoot_photon(power, &mut rng)
             })
             .collect::<Vec<_>>();
