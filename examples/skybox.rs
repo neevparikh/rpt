@@ -26,7 +26,7 @@ fn main() -> color_eyre::Result<()> {
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 2000.0);
+    let light_mtl = Material::light(hex_color(0xFFFEFA), 50000.0);
 
     let floor = polygon(&[
         SCALE * glm::vec3(0.0, 0.0, -850.0),
@@ -35,10 +35,10 @@ fn main() -> color_eyre::Result<()> {
         SCALE * glm::vec3(556.0, 0.0, -850.0),
     ]);
 
-    let p1 = SCALE * glm::vec3(343.0, 548.9, 227.0);
-    let p2 = SCALE * glm::vec3(343.0, 548.9, 332.0);
-    let p3 = SCALE * glm::vec3(213.0, 548.9, 332.0);
-    let p4 = SCALE * glm::vec3(213.0, 548.9, 227.0);
+    let p1 = SCALE * glm::vec3(343.0 - 50.0, 548.9, 227.0);
+    let p2 = SCALE * glm::vec3(343.0 - 50.0, 548.9, 332.0);
+    let p3 = SCALE * glm::vec3(213.0 + 50.0, 548.9, 332.0);
+    let p4 = SCALE * glm::vec3(213.0 + 50.0, 548.9, 227.0);
 
     let c1 = SCALE * glm::vec3(0.0, 548.9, -850.0);
     let c2 = SCALE * glm::vec3(556.0, 548.9, -850.0);
@@ -61,7 +61,7 @@ fn main() -> color_eyre::Result<()> {
     let b3 = p3 + shift;
     let b4 = p4 + shift;
 
-    let light_rect = polygon(&[b1, b2, b3, b4]);
+    let light_rect = polygon(&[b1, b2, b3, b4]).translate(&glm::vec3(-50.0, 0.0, 50.0));
 
     let back_wall = polygon(&[
         SCALE * glm::vec3(0.0, 0.0, 559.2),
@@ -113,7 +113,7 @@ fn main() -> color_eyre::Result<()> {
     scene.add((light_rect, light_mtl));
     scene.environment = Environment::Color(hex_color(0x87CEEB));
 
-    scene.add(Medium::homogeneous_isotropic(0.000001, 0.0008)); // foggy
+    scene.add(Medium::homogeneous_isotropic(0.0003, 0.0003)); // foggy
 
     let mut time = Instant::now();
     fs::create_dir_all("skybox/")?;
@@ -122,8 +122,8 @@ fn main() -> color_eyre::Result<()> {
         .height(512)
         .filter(Filter::Box(1))
         .max_bounces(4)
-        .num_samples(1000)
-        .iterative_render(100, |iteration, buffer| {
+        .num_samples(5000)
+        .iterative_render(1000, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",
