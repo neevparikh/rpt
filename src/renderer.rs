@@ -197,7 +197,7 @@ impl<'a> Renderer<'a> {
             // let rr_p: f64 = rng.gen_range(0.0..1.0);
             let (max_dist, surface_color) = match self.get_closest_hit(ray) {
                 None => {
-                    let background_dist = 600.0;
+                    let background_dist = 400.0;
                     let color = if d >= background_dist {
                         medium.transmittence(&ray, background_dist, 0.0, rng)
                             * self.scene.environment.get_color(&ray.dir)
@@ -354,7 +354,6 @@ impl<'a> Renderer<'a> {
                         color += scat
                             * medium.transmittence(&ray, dist_to_light, 0.0, rng)
                             * &intensity
-                            * scat
                             * ph;
                     }
                 }
@@ -400,15 +399,11 @@ impl<'a> Renderer<'a> {
                 if let Some(hit) = closest_hit {
                     if (hit - dist_to_light).abs() < EPSILON {
                         let f = material.bsdf(n, wo, &wi);
-                        color += f.component_mul(&intensity) * wi.dot(n);
-                        if medium.is_some() {
-                            color *= medium.as_ref().unwrap().transmittence(
-                                &ray,
-                                dist_to_light,
-                                0.0,
-                                rng,
-                            );
+                        let mut additional_color = f.component_mul(&intensity) * wi.dot(n);
+                        if let Some(medium) = medium {
+                            additional_color *= medium.transmittence(&ray, dist_to_light, 0.0, rng);
                         }
+                        color += additional_color;
                     }
                 }
             }
