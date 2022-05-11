@@ -81,12 +81,13 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(small_box).material(white));
     scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    let absorb = 0.0002;
-    let scat = 0.0002;
-    let size = 512;
+    let absorb = 0.002;
+    let scat = 0.002;
+    let size = 256;
     let bounce = 10;
-    let sample = 300;
-    let photons = 1_000_000;
+    let sample = 20;
+    let watts = 100_000.;
+    let photons = 2_000_000;
     let gather_size = 200;
     let gather_size_volume = 100;
 
@@ -98,14 +99,15 @@ fn main() -> color_eyre::Result<()> {
         // .filter(Filter::Box(1))
         .max_bounces(bounce)
         .num_samples(sample)
+        .watts(watts)
         .gather_size(gather_size)
         .gather_size_volume(gather_size_volume)
-        .photon_map_render(photons);
+        .photon_beam_render(photons);
 
     image
         .save(format!(
-            "vpm/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
-            size, bounce, sample, photons, 100, gather_size, gather_size_volume, absorb, scat
+            "vpm/bvh/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");
     Ok(())

@@ -40,39 +40,62 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(0.0, 548.9, 559.2),
     ]);
 
+    // width 130, depth 105
     let light_rect = polygon(&[
-        glm::vec3(343.0, 548.8, 227.0),
-        glm::vec3(343.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 227.0),
+        glm::vec3(330.0, 548.8, 240.0),
+        glm::vec3(330.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 240.0),
     ]);
 
-    let shift = glm::vec3(0.0, 70.0, 0.0);
+    // let shift = glm::vec3(0.0, 70.0, 0.0);
+    // let front_shade = polygon(&[
+    //     glm::vec3(343.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 332.0) - shift,
+    //     glm::vec3(343.0, 548.99, 332.0),
+    //     glm::vec3(343.0, 548.99, 227.0),
+    // ]);
+    // let left_shade = polygon(&[
+    //     glm::vec3(343.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 332.0),
+    //     glm::vec3(343.0, 548.99, 332.0),
+    // ]);
+    // let back_shade = polygon(&[
+    //     glm::vec3(213.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 227.0) - shift,
+    //     glm::vec3(213.0, 548.99, 227.0),
+    //     glm::vec3(213.0, 548.99, 332.0),
+    // ]);
+    // let right_shade = polygon(&[
+    //     glm::vec3(213.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 227.0),
+    //     glm::vec3(213.0, 548.99, 227.0),
+    // ]);
 
-    let front_shade = polygon(&[
-        glm::vec3(343.0, 548.99, 227.0) - shift,
-        glm::vec3(343.0, 548.99, 332.0) - shift,
-        glm::vec3(343.0, 548.99, 332.0),
-        glm::vec3(343.0, 548.99, 227.0),
-    ]);
-    let left_shade = polygon(&[
-        glm::vec3(343.0, 548.99, 332.0) - shift,
-        glm::vec3(213.0, 548.99, 332.0) - shift,
-        glm::vec3(213.0, 548.99, 332.0),
-        glm::vec3(343.0, 548.99, 332.0),
-    ]);
-    let back_shade = polygon(&[
-        glm::vec3(213.0, 548.99, 332.0) - shift,
-        glm::vec3(213.0, 548.99, 227.0) - shift,
-        glm::vec3(213.0, 548.99, 227.0),
-        glm::vec3(213.0, 548.99, 332.0),
-    ]);
-    let right_shade = polygon(&[
-        glm::vec3(213.0, 548.99, 227.0) - shift,
-        glm::vec3(343.0, 548.99, 227.0) - shift,
-        glm::vec3(343.0, 548.99, 227.0),
-        glm::vec3(213.0, 548.99, 227.0),
-    ]);
+    let height = 140.;
+    let depth = 105.;
+    let width = 130.;
+    let center = glm::vec3(213. + 65., 548., 227. + 55.);
+    let front_offset = center + glm::vec3(0., 0., depth / 2.);
+    let left_offset = center + glm::vec3(-width / 2., 0., 0.);
+    let back_offset = center + glm::vec3(0., 0., -depth / 2.);
+    let right_offset = center + glm::vec3(width / 2., 0., 0.);
+
+    let off_axis_size = 10.;
+    let front_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&front_offset);
+    let left_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&left_offset);
+    let back_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&back_offset);
+    let right_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&right_offset);
 
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
@@ -117,14 +140,15 @@ fn main() -> color_eyre::Result<()> {
 
     scene.add((light_rect, light_mtl));
 
-    let absorb = 0.0001;
-    let scat = 0.0001;
+    let absorb = 0.0002;
+    let scat = 0.0002;
     let size = 256;
     let bounce = 10;
-    let sample = 200;
+    let sample = 100;
+    let watts = 15.;
     let photons = 1_000_000;
-    let gather_size = 200;
-    let gather_size_volume = 30;
+    let gather_size = 70;
+    let gather_size_volume = 50;
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
@@ -135,13 +159,14 @@ fn main() -> color_eyre::Result<()> {
         .max_bounces(bounce)
         .num_samples(sample)
         .gather_size(gather_size)
+        .watts(watts)
         .gather_size_volume(gather_size_volume)
         .photon_map_render(photons);
 
     image
         .save(format!(
-            "vpm/lamp/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
-            size, bounce, sample, photons, 100, gather_size, gather_size_volume, absorb, scat
+            "vpm/lamp/a_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");
     Ok(())
