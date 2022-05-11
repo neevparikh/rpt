@@ -30,6 +30,7 @@ mod material;
 mod medium;
 mod object;
 mod ode;
+mod photon;
 mod renderer;
 mod scene;
 mod shape;
