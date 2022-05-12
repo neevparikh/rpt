@@ -345,8 +345,47 @@ impl PhotonMap {
 
                                 let mut max_radius = 0.;
 
+                                let K2 = |sqrParam: f64| {
+                                    let tmp = 1. - sqrParam;
+                                    return (3. / 3.141592653589) * tmp * tmp;
+                                };
+
                                 // estimate indirect lighting via photon map
                                 for photon in intersected_photons.iter() {
+                                    if true {
+                                        let m_scaleFactor = 1.;
+
+                                        let originToCenter = photon.position - ray.origin;
+                                        if originToCenter.norm() > h.time {
+                                            continue;
+                                        }
+                                        let radSqr = photon.radius * photon.radius;
+                                        let diskDistance = glm::dot(&originToCenter, &ray.dir);
+                                        let distSqr =
+                                            (ray.at(diskDistance) - photon.position).norm().powi(2);
+
+                                        if diskDistance > 0. && distSqr < radSqr {
+                                            let weight = K2(distSqr / radSqr) / radSqr;
+
+                                            let wi = -photon.direction;
+
+                                            let transmittance = (-extinction * diskDistance).exp();
+                                            volume_color += transmittance
+                                                * photon.power
+                                                * medium.phase(&wi, &(-ray.dir))
+                                                * weight
+                                                * m_scaleFactor;
+                                        }
+
+                                        if rng.gen::<f64>() < 0.00000001 {
+                                            dbg!(originToCenter);
+                                            dbg!(radSqr);
+                                            dbg!(diskDistance);
+                                            dbg!(distSqr);
+                                        }
+
+                                        continue;
+                                    }
                                     if photon.radius > max_radius {
                                         max_radius = photon.radius;
                                     }
@@ -376,18 +415,6 @@ impl PhotonMap {
                                         0.
                                     };
 
-                                    if rng.gen::<f64>() < 0.0000001 {
-                                        dbg!(distance_to_ray);
-                                        dbg!(medium.transmittence(
-                                            &ray,
-                                            (photon.position + photon_to_ray - ray.origin)
-                                                .magnitude(),
-                                            0.,
-                                            rng,
-                                        ));
-                                        dbg!(kernel_value);
-                                    }
-
                                     volume_color += kernel_value
                                         * photon.power
                                         * medium.transmittence(
@@ -402,7 +429,7 @@ impl PhotonMap {
                                 }
                                 // normalize by number of photons and radius of query beam
                                 // volume_color /= intersected_photons.len() as f64;
-                                volume_color /= glm::pi::<f64>() * max_radius * max_radius;
+                                // volume_color /= glm::pi::<f64>() * max_radius * max_radius;
 
                                 let surface_color = surface_estimate(&h, &material)
                                     * medium.transmittence(&ray, h.time, 0., rng);
@@ -700,8 +727,7 @@ impl<'a> Renderer<'a> {
                     } else {
                         // no scattering event
                         trace_on_surface(
-                            power * medium.transmittence(&ray, h.time, 0.0, rng),
-                            /// (d_cdf),
+                            power * medium.transmittence(&ray, h.time, 0.0, rng) / (d_cdf),
                             &h,
                             object,
                             rng,

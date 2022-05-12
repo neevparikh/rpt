@@ -140,15 +140,16 @@ fn main() -> color_eyre::Result<()> {
 
     scene.add((light_rect, light_mtl));
 
-    let absorb = 0.0002;
-    let scat = 0.0002;
+    let absorb = 0.0008;
+    let scat = 0.0008;
     let size = 256;
     let bounce = 10;
-    let sample = 100;
-    let watts = 15.;
+    let sample = 50;
+    let watts = 10_000.;
     let photons = 1_000_000;
-    let gather_size = 70;
-    let gather_size_volume = 50;
+
+    let gather_size = 30;
+    let gather_size_volume = 30;
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
@@ -161,11 +162,11 @@ fn main() -> color_eyre::Result<()> {
         .gather_size(gather_size)
         .watts(watts)
         .gather_size_volume(gather_size_volume)
-        .photon_map_render(photons);
+        .photon_beam_render(photons);
 
     image
         .save(format!(
-            "vpm/lamp/a_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            "vpm/lamp/n_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
             size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");
