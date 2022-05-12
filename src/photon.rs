@@ -178,7 +178,7 @@ impl PhotonMap {
     ) -> Color {
         let wo = -glm::normalize(&ray.dir);
 
-        let mut surface_estimate = |h: &HitRecord, material: &Material, rng: &mut StdRng| {
+        let surface_estimate = |h: &HitRecord, material: &Material, rng: &mut StdRng| {
             let world_pos = ray.at(h.time);
             let near_photons = self.surface().nearests(
                 &[world_pos.x, world_pos.y, world_pos.z],
@@ -223,229 +223,170 @@ impl PhotonMap {
             color
         };
 
+        let volume_estimate = |medium: &Medium,
+                               hit: Option<&HitRecord>,
+                               object: Option<&Object>,
+                               rng: &mut StdRng| {
+            match self {
+                Self::PointMapForPointEstimate(surface_map, volume_map) => {
+                    let (d, d_pdf, d_cdf) = medium.sample_d(&ray, rng);
+                    if hit.is_none() || d < hit.unwrap().time {
+                        let collision = ray.at(d);
+                        let abs = medium.absorption(&collision);
+                        let emm = medium.emission(&collision);
+                        let scat = medium.scattering(&collision);
+                        let extinction = abs + scat;
+
+                        let mut color = Color::new(0., 0., 0.);
+
+                        // direct lighting for media particle
+                        // color += self.sample_lights_for_media(&medium,
+                        // &collision,&wo, rng);
+
+                        // estimate indirect lighting via photon map
+                        let near_photons = volume_map.nearests(
+                            &[collision.x, collision.y, collision.z],
+                            renderer.gather_size_volume,
+                        );
+
+                        let max_dist_squared = near_photons
+                            .iter()
+                            .map(
+                                |ItemAndDistance {
+                                     squared_distance, ..
+                                 }| { squared_distance },
+                            )
+                            .fold(0., |acc: f64, &p: &f64| acc.max(p));
+
+                        for ItemAndDistance {
+                            item: photon,
+                            squared_distance: _,
+                        } in near_photons
+                        {
+                            color += photon.power.component_mul(&emm)
+                                * medium.phase(&wo, &photon.direction);
+                        }
+                        color /= (4. / 3.) * glm::pi::<f64>() * max_dist_squared.powf(1.5);
+                        // color /= scat;
+                        color /= extinction;
+
+                        color *= medium.transmittence(&ray, d, 0.0, rng);
+                        color /= d_pdf;
+
+                        color
+                    } else {
+                        let material = object.unwrap().material;
+                        // TODO: do we need transmittance here?
+                        surface_estimate(&hit.unwrap(), &material, rng)
+                            * medium.transmittence(&ray, hit.unwrap().time, 0.0, rng)
+                        //    / d_cdf
+                    }
+                }
+                Self::PointMapForBeamEstimate(surface_map, bvh, spheres) => {
+                    let intersected_photons = bvh.traverse(
+                        &BvhRay::new(
+                            Point3::new(
+                                ray.origin.x as f32,
+                                ray.origin.y as f32,
+                                ray.origin.z as f32,
+                            ),
+                            Point3::new(ray.dir.x as f32, ray.dir.y as f32, ray.dir.z as f32),
+                        ),
+                        spheres.as_slice(),
+                    );
+
+                    let dummy_pos = glm::vec3(0., 0., 0.);
+                    let abs = medium.absorption(&dummy_pos);
+                    let emm = medium.emission(&dummy_pos);
+                    let scat = medium.scattering(&dummy_pos);
+                    let extinction = abs + scat;
+
+                    let mut volume_color = Color::new(0., 0., 0.);
+
+                    // direct lighting for media particle
+                    // color += self.sample_lights_for_media(&medium, &collision, &wo,
+                    // rng);
+
+                    let evaluate_kernel = |x: f64| -> f64 {
+                        3. * glm::one_over_pi::<f64>() * (1. - x.powi(2)).powi(2)
+                    };
+
+                    let mut max_radius = 0.;
+
+                    let K2 = |sqrParam: f64| {
+                        let tmp = 1. - sqrParam;
+                        return (3. / 3.141592653589) * tmp * tmp;
+                    };
+
+                    // estimate indirect lighting via photon map
+                    for photon in intersected_photons.iter() {
+                        if true {
+                            let m_scaleFactor = 1.;
+
+                            let originToCenter = photon.position - ray.origin;
+
+                            if let Some(hit) = hit {
+                                if originToCenter.norm() > hit.time {
+                                    continue;
+                                }
+                            }
+                            let radSqr = photon.radius * photon.radius;
+                            let diskDistance = glm::dot(&originToCenter, &ray.dir);
+                            let distSqr = (ray.at(diskDistance) - photon.position).norm().powi(2);
+
+                            if diskDistance > 0. && distSqr < radSqr {
+                                let weight = K2(distSqr / radSqr) / radSqr;
+
+                                let wi = -photon.direction;
+
+                                let transmittance = (-extinction * diskDistance).exp();
+                                volume_color += transmittance
+                                    * photon.power.component_mul(&emm)
+                                    * medium.phase(&wi, &(-ray.dir))
+                                    * weight
+                                    * m_scaleFactor;
+                            }
+
+                            if rng.gen::<f64>() < 0.00000001 {
+                                dbg!(originToCenter);
+                                dbg!(radSqr);
+                                dbg!(diskDistance);
+                                dbg!(distSqr);
+                            }
+
+                            continue;
+                        }
+                    }
+
+                    return volume_color;
+                }
+            }
+        };
+
         match renderer.get_closest_hit(*ray) {
-            None => renderer.scene.environment.get_color(&ray.dir),
+            None => match medium {
+                None => renderer.scene.environment.get_color(&ray.dir),
+                Some(m) => volume_estimate(m, None, None, rng),
+            },
             Some((h, object)) => {
                 let world_pos = ray.at(h.time);
                 let material = object.material;
                 match medium {
                     None => surface_estimate(&h, &material, rng),
-                    Some(medium) => {
-                        match self {
-                            Self::PointMapForPointEstimate(surface_map, volume_map) => {
-                                let (d, d_pdf, d_cdf) = medium.sample_d(&ray, rng);
-                                if d < h.time {
-                                    let collision = ray.at(d);
-                                    let abs = medium.absorption(&collision);
-                                    let emm = medium.emission(&collision);
-                                    let scat = medium.scattering(&collision);
-                                    let extinction = abs + scat;
-
-                                    let mut color = Color::new(0., 0., 0.);
-
-                                    // direct lighting for media particle
-                                    // color += self.sample_lights_for_media(&medium,
-                                    // &collision,&wo, rng);
-
-                                    // estimate indirect lighting via photon map
-                                    let near_photons = volume_map.nearests(
-                                        &[collision.x, collision.y, collision.z],
-                                        renderer.gather_size_volume,
-                                    );
-
-                                    let max_dist_squared = near_photons
-                                        .iter()
-                                        .map(
-                                            |ItemAndDistance {
-                                                 squared_distance, ..
-                                             }| {
-                                                squared_distance
-                                            },
-                                        )
-                                        .fold(0., |acc: f64, &p: &f64| acc.max(p));
-
-                                    for ItemAndDistance {
-                                        item: photon,
-                                        squared_distance: _,
-                                    } in near_photons
-                                    {
-                                        color += photon.power.component_mul(&emm)
-                                            * medium.phase(&wo, &photon.direction);
-                                    }
-                                    color /=
-                                        (4. / 3.) * glm::pi::<f64>() * max_dist_squared.powf(1.5);
-                                    // color /= scat;
-                                    color /= extinction;
-
-                                    color *= medium.transmittence(&ray, d, 0.0, rng);
-                                    color /= d_pdf;
-
-                                    color
-                                } else {
-                                    if material.is_mirror() {
-                                        todo!()
-                                        // if num_bounces > 100 {
-                                        //     return Color::new(0., 0., 0.);
-                                        // }
-                                        // if let Some((wi, pdf)) = material.sample_f(&h.normal,
-                                        // &wo, rng) {
-                                        //     self.trace_ray_with_photon_map(
-                                        //         Ray {
-                                        //             origin: world_pos,
-                                        //             dir:    wi,
-                                        //         },
-                                        //         num_bounces + 1,
-                                        //         rng,
-                                        //         photon_map,
-                                        //     )
-                                        // } else {
-                                        //     // total internal reflection
-                                        //     Color::new(0., 0., 0.)
-                                        // }
-                                    } else {
-                                        // TODO: do we need transmittance here?
-                                        surface_estimate(&h, &material, rng)
-                                            * medium.transmittence(&ray, h.time, 0.0, rng)
-                                        //    / d_cdf
-                                    }
-                                }
-                            }
-                            Self::PointMapForBeamEstimate(surface_map, bvh, spheres) => {
-                                let intersected_photons = bvh.traverse(
-                                    &BvhRay::new(
-                                        Point3::new(
-                                            ray.origin.x as f32,
-                                            ray.origin.y as f32,
-                                            ray.origin.z as f32,
-                                        ),
-                                        Point3::new(
-                                            ray.dir.x as f32,
-                                            ray.dir.y as f32,
-                                            ray.dir.z as f32,
-                                        ),
-                                    ),
-                                    spheres.as_slice(),
-                                );
-
-                                let dummy_pos = glm::vec3(0., 0., 0.);
-                                let abs = medium.absorption(&dummy_pos);
-                                let emm = medium.emission(&dummy_pos);
-                                let scat = medium.scattering(&dummy_pos);
-                                let extinction = abs + scat;
-
-                                let mut volume_color = Color::new(0., 0., 0.);
-
-                                // direct lighting for media particle
-                                // color += self.sample_lights_for_media(&medium, &collision, &wo,
-                                // rng);
-
-                                let evaluate_kernel = |x: f64| -> f64 {
-                                    3. * glm::one_over_pi::<f64>() * (1. - x.powi(2)).powi(2)
-                                };
-
-                                let mut max_radius = 0.;
-
-                                let K2 = |sqrParam: f64| {
-                                    let tmp = 1. - sqrParam;
-                                    return (3. / 3.141592653589) * tmp * tmp;
-                                };
-
-                                // estimate indirect lighting via photon map
-                                for photon in intersected_photons.iter() {
-                                    if true {
-                                        let m_scaleFactor = 1.;
-
-                                        let originToCenter = photon.position - ray.origin;
-                                        if originToCenter.norm() > h.time {
-                                            continue;
-                                        }
-                                        let radSqr = photon.radius * photon.radius;
-                                        let diskDistance = glm::dot(&originToCenter, &ray.dir);
-                                        let distSqr =
-                                            (ray.at(diskDistance) - photon.position).norm().powi(2);
-
-                                        if diskDistance > 0. && distSqr < radSqr {
-                                            let weight = K2(distSqr / radSqr) / radSqr;
-
-                                            let wi = -photon.direction;
-
-                                            let transmittance = (-extinction * diskDistance).exp();
-                                            volume_color += transmittance
-                                                * photon.power.component_mul(&emm)
-                                                * medium.phase(&wi, &(-ray.dir))
-                                                * weight
-                                                * m_scaleFactor;
-                                        }
-
-                                        if rng.gen::<f64>() < 0.00000001 {
-                                            dbg!(originToCenter);
-                                            dbg!(radSqr);
-                                            dbg!(diskDistance);
-                                            dbg!(distSqr);
-                                        }
-
-                                        continue;
-                                    }
-                                    // if photon.radius > max_radius {
-                                    //     max_radius = photon.radius;
-                                    // }
-                                    // // compute the shortest vector from the photon to the ray
-                                    // let photon_to_ray = {
-                                    //     let eye_to_photon = photon.position - world_pos;
-                                    //     let direction = eye_to_photon
-                                    //         .cross(&ray.dir)
-                                    //         .cross(&ray.dir)
-                                    //         .normalize();
-                                    //     let magnitude =
-                                    //         eye_to_photon.cross(&ray.dir).norm() /
-                                    // ray.dir.norm();
-                                    //     magnitude * direction
-                                    // };
-
-                                    // let distance_to_ray = photon_to_ray.norm();
-                                    // let kernel_value = if distance_to_ray < photon.radius {
-                                    //     photon.radius.powi(-2)
-                                    //         * evaluate_kernel(distance_to_ray / photon.radius)
-                                    // } else {
-                                    //     0.
-                                    // };
-
-                                    // let kernel_value = if distance_to_ray < photon.radius {
-                                    //     1.
-                                    // } else {
-                                    //     0.
-                                    // };
-
-                                    // volume_color += kernel_value
-                                    //     * photon.power
-                                    //     * medium.transmittence( &ray, (photon.position +
-                                    //       photon_to_ray - ray.origin) .magnitude(), 0., rng,
-                                    //     )
-                                    //     * scat
-                                    //     * medium.phase(&wo, &photon.direction);
-                                }
-                                // normalize by number of photons and radius of query beam
-                                // volume_color /= intersected_photons.len() as f64;
-                                // volume_color /= glm::pi::<f64>() * max_radius * max_radius;
-
-                                let surface_color = surface_estimate(&h, &material, rng)
-                                    * medium.transmittence(&ray, h.time, 0., rng);
-
-                                // if max_dist_squared > 0.1 {
-                                //     color = Color::new(0., 0., 0.);
-                                // }
-                                if rng.gen::<f64>() < 0.00001 {
-                                    dbg!(max_radius);
-                                    println!("Intersected photons: {}", intersected_photons.len());
-                                    println!(
-                                        "Surface: {}, volume: {}",
-                                        surface_color, volume_color
-                                    );
-                                }
-                                return surface_color + volume_color;
-                            }
+                    Some(medium) => match self {
+                        Self::PointMapForPointEstimate(surface_map, volume_map) => {
+                            volume_estimate(&medium, None, None, rng)
                         }
-                    }
+                        Self::PointMapForBeamEstimate(surface_map, _, _) => {
+                            let volume_color = volume_estimate(medium, Some(&h), Some(object), rng);
+                            let surface_color = surface_estimate(&h, &material, rng)
+                                * medium.transmittence(&ray, h.time, 0., rng);
+                            if rng.gen::<f64>() < 0.00001 {
+                                println!("Surface: {}, volume: {}", surface_color, volume_color);
+                            }
+                            surface_color + volume_color
+                        }
+                    },
                 }
             }
         }
@@ -473,7 +414,7 @@ impl<'a> Renderer<'a> {
             match light {
                 Light::Object(_) => {}
                 _ => {
-                    panic!("Only object lights are supported for photon mapping");
+                    // panic!("Only object lights are supported for photon mapping");
                 }
             }
         }
@@ -543,48 +484,51 @@ impl<'a> Renderer<'a> {
         let light = &self.scene.lights[light_index as usize];
 
         // sample a random point on the light and a random direction in the hemisphere
-        if let Light::Object(object) = light {
-            // the `target` arg isn't used when sampling a triangle, so it can be a dummy value
-            // Sample a location on the light
-            let target = glm::vec3(0., 0., 0.);
-            let (pos, n, pdf) = object.shape.sample(&target, rng);
+        for light in self.scene.lights.iter() {
+            if let Light::Object(object) = light {
+                // the `target` arg isn't used when sampling a triangle, so it can be a dummy value
+                // Sample a location on the light
+                let target = glm::vec3(0., 0., 0.);
+                let (pos, n, pdf) = object.shape.sample(&target, rng);
 
-            // sample random hemisphere direction
-            let phi = 2. * glm::pi::<f64>() * rng.gen::<f64>();
-            let theta = (1. - rng.gen::<f64>()).acos();
-            let pdf_of_sample = 0.5 * glm::one_over_pi::<f64>();
-            let random_hemisphere_dir = glm::vec3(
-                theta.sin() * phi.cos(),
-                theta.cos(),
-                theta.sin() * phi.sin(),
-            );
+                // sample random hemisphere direction
+                let phi = 2. * glm::pi::<f64>() * rng.gen::<f64>();
+                let theta = (1. - rng.gen::<f64>()).acos();
+                let pdf_of_sample = 0.5 * glm::one_over_pi::<f64>();
+                let random_hemisphere_dir = glm::vec3(
+                    theta.sin() * phi.cos(),
+                    theta.cos(),
+                    theta.sin() * phi.sin(),
+                );
 
-            // rotate direction towards normal
-            let rotation: nalgebra::Rotation3<f64> = nalgebra::Rotation3::rotation_between(
-                &glm::vec3(0., 1., 0.),
-                &n,
-            )
-            .unwrap_or_else(|| {
-                nalgebra::Rotation3::rotation_between(&glm::vec3(0., 1., 0.00000001), &n).unwrap()
-            });
-            let direction = rotation * random_hemisphere_dir;
+                // rotate direction towards normal
+                let rotation: nalgebra::Rotation3<f64> =
+                    nalgebra::Rotation3::rotation_between(&glm::vec3(0., 1., 0.), &n)
+                        .unwrap_or_else(|| {
+                            nalgebra::Rotation3::rotation_between(
+                                &glm::vec3(0., 1., 0.00000001),
+                                &n,
+                            )
+                            .unwrap()
+                        });
+                let direction = rotation * random_hemisphere_dir;
 
-            // recursively gather photons
-            let photons = self.trace_photon(
-                Ray {
-                    origin: pos,
-                    dir:    direction,
-                },
-                power * object.material.color(),
-                /// pdf / pdf_of_sample,
-                rng,
-                0,
-            );
+                // recursively gather photons
+                let photons = self.trace_photon(
+                    Ray {
+                        origin: pos,
+                        dir:    direction,
+                    },
+                    power * object.material.color(),
+                    /// pdf / pdf_of_sample,
+                    rng,
+                    0,
+                );
 
-            photons
-        } else {
-            panic!("Found non-object light while photon mapping")
+                return photons;
+            }
         }
+        panic!("Only found non-object lights while photon mapping")
     }
 
     /// trace a photon along ray `ray` with power `power` and check for intersections. Returns
