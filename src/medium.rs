@@ -2,7 +2,7 @@ use rand::rngs::StdRng;
 use rand::Rng;
 
 use crate::color::Color;
-use crate::{hex_color, HitRecord, Ray};
+use crate::{hex_color, Ray};
 
 /// Represents volumetric media To represent the media in a heterogenous way, the absorption
 /// scattering parameters are dependent on the position.
@@ -112,7 +112,7 @@ impl Medium {
 
 impl Medium {
     /// Returns transmittence along ray up to t_max
-    pub fn transmittence(&self, ray: &Ray, t_max: f64, step: f64, rng: &mut StdRng) -> f64 {
+    pub fn transmittence(&self, ray: &Ray, t_max: f64, _step: f64, _rng: &mut StdRng) -> f64 {
         let extinction = self.extinction(&ray.origin);
         let optical_thickness = extinction * t_max;
         (-optical_thickness).exp()

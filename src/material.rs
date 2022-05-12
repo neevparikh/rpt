@@ -1,9 +1,8 @@
 use nalgebra;
 use rand::rngs::StdRng;
 use rand::Rng;
-use rand_distr::{UnitCircle, UnitDisc};
 
-use crate::color::{hex_color, Color};
+use crate::color::Color;
 
 #[derive(Copy, Clone)]
 pub enum Material {
@@ -64,7 +63,7 @@ impl Material {
     }
 
     /// Clear material with a specified index of refraction and roughness (such as glass)
-    pub fn clear(index: f64, roughness: f64) -> Self {
+    pub fn clear(index: f64, _roughness: f64) -> Self {
         Self::Transmissive {
             albedo: glm::vec3(0., 0., 0.),
             ior:    index,
@@ -72,7 +71,7 @@ impl Material {
     }
 
     /// Colored transparent material
-    pub fn transparent(color: Color, index: f64, roughness: f64) -> Self {
+    pub fn transparent(color: Color, index: f64, _roughness: f64) -> Self {
         Self::Transmissive {
             albedo: color,
             ior:    index,
@@ -115,14 +114,20 @@ impl Material {
     pub fn get_diffuse(&self) -> glm::DVec3 {
         match self {
             &Self::Lambertian { albedo, .. } => albedo,
-            &Self::Phong { albedo, .. } => glm::vec3(0.5, 0.5, 0.5),
+            &Self::Phong {
+                albedo: _albedo, ..
+            } => glm::vec3(0.5, 0.5, 0.5),
             _ => glm::vec3(0., 0., 0.),
         }
     }
     pub fn get_specular(&self) -> glm::DVec3 {
         match self {
-            Self::Lambertian { albedo, .. } => glm::vec3(0., 0., 0.),
-            Self::Phong { albedo, .. } => glm::vec3(0.5, 0.5, 0.5),
+            Self::Lambertian {
+                albedo: _albedo, ..
+            } => glm::vec3(0., 0., 0.),
+            Self::Phong {
+                albedo: _albedo, ..
+            } => glm::vec3(0.5, 0.5, 0.5),
             Self::Mirror => glm::vec3(1., 1., 1.),
             Self::Transmissive { .. } => glm::vec3(1., 1., 1.),
         }

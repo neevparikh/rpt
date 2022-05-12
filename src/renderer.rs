@@ -1,7 +1,4 @@
 use image::RgbImage;
-use indicatif::{ParallelProgressIterator, ProgressBar};
-use kd_tree::{ItemAndDistance, KdPoint, KdTree};
-use nalgebra;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;

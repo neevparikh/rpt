@@ -220,7 +220,7 @@ fn load_mtl(file: File) -> io::Result<HashMap<String, Material>> {
                     "Material was not specified with `newmtl` before properties were added",
                 )
             })?;
-            let mat = materials.get_mut(current).unwrap();
+            let _mat = materials.get_mut(current).unwrap();
             // Best-effort conversion from Ka/Kd/Ks material to physically-based material
             panic!("MTL loading not implemented")
             /*
