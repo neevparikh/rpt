@@ -233,7 +233,7 @@ impl PhotonMap {
                     Some(medium) => {
                         match self {
                             Self::PointMapForPointEstimate(surface_map, volume_map) => {
-                                let (d, d_pdf, _d_cdf) = medium.sample_d(&ray, rng);
+                                let (d, d_pdf, d_cdf) = medium.sample_d(&ray, rng);
                                 if d < h.time {
                                     let collision = ray.at(d);
                                     let abs = medium.absorption(&collision);
@@ -274,15 +274,12 @@ impl PhotonMap {
                                     }
                                     color /=
                                         (4. / 3.) * glm::pi::<f64>() * max_dist_squared.powf(1.5);
-                                    color /= scat;
-                                    // color /= extinction;
+                                    // color /= scat;
+                                    color /= extinction;
 
                                     color *= medium.transmittence(&ray, d, 0.0, rng);
                                     color /= d_pdf;
 
-                                    // if max_dist_squared > 0.1 {
-                                    //     color = Color::new(0., 0., 0.);
-                                    // }
                                     color
                                 } else {
                                     if material.is_mirror() {
@@ -309,6 +306,7 @@ impl PhotonMap {
                                         // TODO: do we need transmittance here?
                                         surface_estimate(&h, &material)
                                             * medium.transmittence(&ray, h.time, 0.0, rng)
+                                        //    / d_cdf
                                     }
                                 }
                             }
@@ -345,7 +343,6 @@ impl PhotonMap {
                                     3. * glm::one_over_pi::<f64>() * (1. - x.powi(2)).powi(2)
                                 };
 
-
                                 let mut max_radius = 0.;
 
                                 // estimate indirect lighting via photon map
@@ -373,6 +370,24 @@ impl PhotonMap {
                                         0.
                                     };
 
+                                    let kernel_value = if distance_to_ray < photon.radius {
+                                        1.
+                                    } else {
+                                        0.
+                                    };
+
+                                    if rng.gen::<f64>() < 0.0000001 {
+                                        dbg!(distance_to_ray);
+                                        dbg!(medium.transmittence(
+                                            &ray,
+                                            (photon.position + photon_to_ray - ray.origin)
+                                                .magnitude(),
+                                            0.,
+                                            rng,
+                                        ));
+                                        dbg!(kernel_value);
+                                    }
+
                                     volume_color += kernel_value
                                         * photon.power
                                         * medium.transmittence(
@@ -382,11 +397,12 @@ impl PhotonMap {
                                             0.,
                                             rng,
                                         )
+                                        * scat
                                         * medium.phase(&wo, &photon.direction);
                                 }
                                 // normalize by number of photons and radius of query beam
                                 // volume_color /= intersected_photons.len() as f64;
-                                volume_color /= glm::pi::<f64>() * max_radius;
+                                volume_color /= glm::pi::<f64>() * max_radius * max_radius;
 
                                 let surface_color = surface_estimate(&h, &material)
                                     * medium.transmittence(&ray, h.time, 0., rng);
@@ -395,6 +411,7 @@ impl PhotonMap {
                                 //     color = Color::new(0., 0., 0.);
                                 // }
                                 if rng.gen::<f64>() < 0.00001 {
+                                    dbg!(max_radius);
                                     println!("Intersected photons: {}", intersected_photons.len());
                                     println!(
                                         "Surface: {}, volume: {}",
@@ -534,7 +551,8 @@ impl<'a> Renderer<'a> {
                     origin: pos,
                     dir:    direction,
                 },
-                power * object.material.color() / pdf / pdf_of_sample,
+                power * object.material.color(),
+                /// pdf / pdf_of_sample,
                 rng,
                 0,
             );
@@ -556,69 +574,66 @@ impl<'a> Renderer<'a> {
     ) -> PhotonList {
         let wo = -glm::normalize(&ray.dir);
 
-        let trace_on_surface = |power: glm::DVec3,
-                                h: &HitRecord,
-                                object: &Object,
-                                rng: &mut StdRng| {
-            let world_pos = ray.at(h.time);
-            let material = object.material;
-            let wo = -glm::normalize(&ray.dir);
+        let trace_on_surface =
+            |power: glm::DVec3, h: &HitRecord, object: &Object, rng: &mut StdRng| {
+                let world_pos = ray.at(h.time);
+                let material = object.material;
+                let wo = -glm::normalize(&ray.dir);
 
-            // page 16 of siggraph course on photon mapping
-            // let specular = 1. - material.roughness;
-            let specular = 0.1;
-            let specular = material.get_specular();
-            let diffuse = material.get_diffuse();
-            let specular = glm::vec3(0.0, 0.0, 0.0);
-            let diffuse = glm::vec3(0.7, 0.7, 0.7);
-            let p_r = vec![
-                specular.x + diffuse.x,
-                specular.y + diffuse.y,
-                specular.z + diffuse.z,
-            ]
-            .into_iter()
-            .fold(f64::NAN, f64::max);
-            let diffuse_sum = diffuse.x + diffuse.y + diffuse.z;
-            let specular_sum = specular.x + specular.y + specular.z;
-            let p_d = diffuse_sum / (diffuse_sum + specular_sum) * p_r;
-            let p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
-            // only do diffuse russian rouletter for now (no specular)
-            let russian_roulette: f64 = rng.gen();
+                // page 16 of siggraph course on photon mapping
+                // let specular = 1. - material.roughness;
+                let specular = 0.1;
+                let specular = material.get_specular();
+                let diffuse = material.get_diffuse();
+                let specular = glm::vec3(0.0, 0.0, 0.0);
+                let diffuse = glm::vec3(0.7, 0.7, 0.7);
+                let p_r = vec![
+                    specular.x + diffuse.x,
+                    specular.y + diffuse.y,
+                    specular.z + diffuse.z,
+                ]
+                .into_iter()
+                .fold(f64::NAN, f64::max);
+                let diffuse_sum = diffuse.x + diffuse.y + diffuse.z;
+                let specular_sum = specular.x + specular.y + specular.z;
+                let p_d = diffuse_sum / (diffuse_sum + specular_sum) * p_r;
+                let p_s = specular_sum / (diffuse_sum + specular_sum) * p_r;
+                // only do diffuse russian rouletter for now (no specular)
+                let russian_roulette: f64 = rng.gen();
 
-            if russian_roulette < p_d {
-                // diffuse reflection
-                if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
-                    let f = material.bsdf(&h.normal, &wo, &wi);
-                    let ray = Ray {
-                        origin: world_pos,
-                        dir:    wi,
-                    };
-                    // gather recursive photons with scaled down power
-                    let mut next_photons = self.trace_photon(
-                        ray,
-                        power.component_mul(&f).component_mul(&diffuse) * wi.dot(&h.normal)
-                            / pdf / p_d,
-                        rng,
-                        num_bounces + 1,
-                    );
-                    // add photon from current step
-                    if pdf != 1. {
-                        next_photons.add_surface(Photon {
-                            position: world_pos,
-                            direction: wo,
-                            power,
-                        });
+                if russian_roulette < p_d {
+                    // diffuse reflection
+                    if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
+                        let f = material.bsdf(&h.normal, &wo, &wi);
+                        let ray = Ray {
+                            origin: world_pos,
+                            dir:    wi,
+                        };
+                        // gather recursive photons with scaled down power
+                        let mut next_photons = self.trace_photon(
+                            ray,
+                            power.component_mul(&f) * wi.dot(&h.normal) / pdf / p_d,
+                            rng,
+                            num_bounces + 1,
+                        );
+                        // add photon from current step
+                        if pdf != 1. {
+                            next_photons.add_surface(Photon {
+                                position: world_pos,
+                                direction: wo,
+                                power,
+                            });
+                        }
+                        next_photons
+                    } else {
+                        // total internal reflection: no photons
+                        PhotonList::default()
                     }
-                    next_photons
                 } else {
-                    // total internal reflection: no photons
+                    // absorbed
                     PhotonList::default()
                 }
-            } else {
-                // absorbed
-                PhotonList::default()
-            }
-        };
+            };
 
         let trace_in_volume = |power: glm::DVec3,
                                medium: &Medium,
@@ -634,9 +649,7 @@ impl<'a> Renderer<'a> {
 
             // TODO: add back d_pdf term
             let attenuated_power = power * medium.transmittence(&ray, d, 0.0, rng); // / d_pdf;
-
             let rr_prob = scat / extinction;
-            let rr_prob = 0.5;
             let mut next_photons = if rng.gen::<f64>() < rr_prob {
                 let (wi, ph_p) = medium.sample_ph(&wo, rng);
 
@@ -647,7 +660,7 @@ impl<'a> Renderer<'a> {
                 // compute scattered light recursively
                 self.trace_photon(
                     new_ray,
-                    attenuated_power * (scat / extinction) * medium.phase(&wo, &wi) / ph_p / rr_prob,
+                    attenuated_power * medium.phase(&wo, &wi) / ph_p,
                     rng,
                     num_bounces + 1,
                 )
@@ -687,7 +700,8 @@ impl<'a> Renderer<'a> {
                     } else {
                         // no scattering event
                         trace_on_surface(
-                            power * medium.transmittence(&ray, h.time, 0.0, rng) / d_cdf,
+                            power * medium.transmittence(&ray, h.time, 0.0, rng),
+                            /// (d_cdf),
                             &h,
                             object,
                             rng,
