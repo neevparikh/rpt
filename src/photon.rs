@@ -178,7 +178,7 @@ impl PhotonMap {
     ) -> Color {
         let wo = -glm::normalize(&ray.dir);
 
-        let surface_estimate = |h: &HitRecord, material: &Material| {
+        let mut surface_estimate = |h: &HitRecord, material: &Material, rng: &mut StdRng| {
             let world_pos = ray.at(h.time);
             let near_photons = self.surface().nearests(
                 &[world_pos.x, world_pos.y, world_pos.z],
@@ -215,7 +215,7 @@ impl PhotonMap {
             // TODO: divide by probability of sampling behind surface
 
             // direct lighting via light sampling
-            // color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
+            color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
             // emitted lighting
             // color += material.emittance() * material.color();
@@ -229,7 +229,7 @@ impl PhotonMap {
                 let world_pos = ray.at(h.time);
                 let material = object.material;
                 match medium {
-                    None => surface_estimate(&h, &material),
+                    None => surface_estimate(&h, &material, rng),
                     Some(medium) => {
                         match self {
                             Self::PointMapForPointEstimate(surface_map, volume_map) => {
@@ -269,8 +269,8 @@ impl PhotonMap {
                                         squared_distance: _,
                                     } in near_photons
                                     {
-                                        color +=
-                                            photon.power * medium.phase(&wo, &photon.direction);
+                                        color += photon.power.component_mul(&emm)
+                                            * medium.phase(&wo, &photon.direction);
                                     }
                                     color /=
                                         (4. / 3.) * glm::pi::<f64>() * max_dist_squared.powf(1.5);
@@ -304,7 +304,7 @@ impl PhotonMap {
                                         // }
                                     } else {
                                         // TODO: do we need transmittance here?
-                                        surface_estimate(&h, &material)
+                                        surface_estimate(&h, &material, rng)
                                             * medium.transmittence(&ray, h.time, 0.0, rng)
                                         //    / d_cdf
                                     }
@@ -371,7 +371,7 @@ impl PhotonMap {
 
                                             let transmittance = (-extinction * diskDistance).exp();
                                             volume_color += transmittance
-                                                * photon.power
+                                                * photon.power.component_mul(&emm)
                                                 * medium.phase(&wi, &(-ray.dir))
                                                 * weight
                                                 * m_scaleFactor;
@@ -386,52 +386,49 @@ impl PhotonMap {
 
                                         continue;
                                     }
-                                    if photon.radius > max_radius {
-                                        max_radius = photon.radius;
-                                    }
-                                    // compute the shortest vector from the photon to the ray
-                                    let photon_to_ray = {
-                                        let eye_to_photon = photon.position - world_pos;
-                                        let direction = eye_to_photon
-                                            .cross(&ray.dir)
-                                            .cross(&ray.dir)
-                                            .normalize();
-                                        let magnitude =
-                                            eye_to_photon.cross(&ray.dir).norm() / ray.dir.norm();
-                                        magnitude * direction
-                                    };
+                                    // if photon.radius > max_radius {
+                                    //     max_radius = photon.radius;
+                                    // }
+                                    // // compute the shortest vector from the photon to the ray
+                                    // let photon_to_ray = {
+                                    //     let eye_to_photon = photon.position - world_pos;
+                                    //     let direction = eye_to_photon
+                                    //         .cross(&ray.dir)
+                                    //         .cross(&ray.dir)
+                                    //         .normalize();
+                                    //     let magnitude =
+                                    //         eye_to_photon.cross(&ray.dir).norm() /
+                                    // ray.dir.norm();
+                                    //     magnitude * direction
+                                    // };
 
-                                    let distance_to_ray = photon_to_ray.norm();
-                                    let kernel_value = if distance_to_ray < photon.radius {
-                                        photon.radius.powi(-2)
-                                            * evaluate_kernel(distance_to_ray / photon.radius)
-                                    } else {
-                                        0.
-                                    };
+                                    // let distance_to_ray = photon_to_ray.norm();
+                                    // let kernel_value = if distance_to_ray < photon.radius {
+                                    //     photon.radius.powi(-2)
+                                    //         * evaluate_kernel(distance_to_ray / photon.radius)
+                                    // } else {
+                                    //     0.
+                                    // };
 
-                                    let kernel_value = if distance_to_ray < photon.radius {
-                                        1.
-                                    } else {
-                                        0.
-                                    };
+                                    // let kernel_value = if distance_to_ray < photon.radius {
+                                    //     1.
+                                    // } else {
+                                    //     0.
+                                    // };
 
-                                    volume_color += kernel_value
-                                        * photon.power
-                                        * medium.transmittence(
-                                            &ray,
-                                            (photon.position + photon_to_ray - ray.origin)
-                                                .magnitude(),
-                                            0.,
-                                            rng,
-                                        )
-                                        * scat
-                                        * medium.phase(&wo, &photon.direction);
+                                    // volume_color += kernel_value
+                                    //     * photon.power
+                                    //     * medium.transmittence( &ray, (photon.position +
+                                    //       photon_to_ray - ray.origin) .magnitude(), 0., rng,
+                                    //     )
+                                    //     * scat
+                                    //     * medium.phase(&wo, &photon.direction);
                                 }
                                 // normalize by number of photons and radius of query beam
                                 // volume_color /= intersected_photons.len() as f64;
                                 // volume_color /= glm::pi::<f64>() * max_radius * max_radius;
 
-                                let surface_color = surface_estimate(&h, &material)
+                                let surface_color = surface_estimate(&h, &material, rng)
                                     * medium.transmittence(&ray, h.time, 0., rng);
 
                                 // if max_dist_squared > 0.1 {
@@ -687,7 +684,7 @@ impl<'a> Renderer<'a> {
                 // compute scattered light recursively
                 self.trace_photon(
                     new_ray,
-                    attenuated_power * medium.phase(&wo, &wi) / ph_p,
+                    attenuated_power.component_mul(&emm) * medium.phase(&wo, &wi) / ph_p,
                     rng,
                     num_bounces + 1,
                 )
@@ -699,7 +696,8 @@ impl<'a> Renderer<'a> {
             next_photons.add_volume(Photon {
                 position:  collision,
                 direction: wo,
-                power:     attenuated_power,
+                power:     attenuated_power
+                    + self.sample_lights_for_media(&medium, &collision, &wo, rng),
             });
 
             next_photons
@@ -727,7 +725,7 @@ impl<'a> Renderer<'a> {
                     } else {
                         // no scattering event
                         trace_on_surface(
-                            power * medium.transmittence(&ray, h.time, 0.0, rng) / (d_cdf),
+                            power * medium.transmittence(&ray, h.time, 0.0, rng), // / (d_cdf),
                             &h,
                             object,
                             rng,

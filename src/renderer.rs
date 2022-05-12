@@ -324,7 +324,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// Explicitly sample from all the lights in the scene
-    fn sample_lights_for_media(
+    pub fn sample_lights_for_media(
         &self,
         medium: &Medium,
         pos: &glm::DVec3,
@@ -363,7 +363,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// Explicitly sample from all the lights in the scene
-    fn sample_lights(
+    pub fn sample_lights(
         &self,
         material: &Material,
         pos: &glm::DVec3,
