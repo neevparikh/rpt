@@ -14,7 +14,10 @@ pub struct Medium {
     scattering: Box<dyn Fn(&glm::DVec3) -> f64 + Send + Sync>,
 
     /// emission
-    emission: Box<dyn Fn(&glm::DVec3) -> Color + Send + Sync>,
+    emission: Box<dyn Fn(&glm::DVec3) -> f64 + Send + Sync>,
+
+    /// color
+    color: Box<dyn Fn(&glm::DVec3) -> Color + Send + Sync>,
 
     /// phase fn
     phase: Box<dyn Fn(&glm::DVec3, &glm::DVec3) -> f64 + Send + Sync>,
@@ -31,10 +34,16 @@ impl Medium {
         absorption(pos)
     }
 
-    /// get emission factor
-    pub fn emission(&self, pos: &glm::DVec3) -> glm::DVec3 {
+    /// get emissivity
+    pub fn emission(&self, pos: &glm::DVec3) -> f64 {
         let emission = &self.emission;
         emission(pos)
+    }
+
+    /// get diffuse color / albedo
+    pub fn color(&self, pos: &glm::DVec3) -> glm::DVec3 {
+        let color = &self.color;
+        color(pos)
     }
 
     /// get scattering factor
@@ -72,7 +81,8 @@ impl Medium {
         Medium {
             absorption: Box::new(move |_| absorption),
             scattering: Box::new(move |_| scattering),
-            emission:   Box::new(move |_| hex_color(0xD2B48C)),
+            emission:   Box::new(move |_| 0.0),
+            color:      Box::new(move |_| hex_color(0xAAAAAA)), // 0xD2B48C
             phase:      Box::new(move |_, _| 1.0 / (4.0 * glm::pi::<f64>())),
             sample_ph:  Box::new(move |_, rng| {
                 let wo = glm::vec3(
@@ -90,19 +100,20 @@ impl Medium {
         Medium {
             absorption: Box::new(move |_| absorption),
             scattering: Box::new(move |_| scattering),
-            emission:   Box::new(move |x| {
+            emission:   Box::new(move |_| 10.0),
+            color:      Box::new(move |x| {
                 if x[1] > 250.0 {
-                    hex_color(0xFF0000) * 10.0
+                    hex_color(0xFF0000)
                 } else {
-                    hex_color(0x0000FF) * 10.0
+                    hex_color(0x0000FF)
                 }
             }),
             phase:      Box::new(move |_, _| 1.0 / 4.0 * glm::pi::<f64>()),
             sample_ph:  Box::new(move |_, rng| {
                 let wo = glm::vec3(
-                    rng.gen_range(0.0..1.0),
-                    rng.gen_range(0.0..1.0),
-                    rng.gen_range(0.0..1.0),
+                    rng.gen_range(-1.0..1.0),
+                    rng.gen_range(-1.0..1.0),
+                    rng.gen_range(-1.0..1.0),
                 );
                 (glm::normalize(&wo), 1.0 / 4.0 * glm::pi::<f64>())
             }),
