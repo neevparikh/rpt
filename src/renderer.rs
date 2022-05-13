@@ -1,4 +1,5 @@
 use image::RgbImage;
+use indicatif::ParallelProgressIterator;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rayon::prelude::*;
@@ -157,6 +158,7 @@ impl<'a> Renderer<'a> {
     fn sample(&self, iterations: u32, buffer: &mut Buffer) {
         let colors: Vec<_> = (0..self.height)
             .into_par_iter()
+            .progress()
             .flat_map(|y| {
                 let mut rng = StdRng::from_entropy();
                 (0..self.width)
