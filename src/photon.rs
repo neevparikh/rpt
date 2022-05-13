@@ -281,7 +281,7 @@ impl PhotonMap {
     ) -> Color {
         let wo = -glm::normalize(&ray.dir);
 
-        let surface_estimate = |h: &HitRecord, material: &Material, rng: &mut StdRng| {
+        let surface_estimate = |h: &HitRecord, material: &Material, _rng: &mut StdRng| {
             let world_pos = ray.at(h.time);
             let near_photons = self.surface().nearests(
                 &[world_pos.x, world_pos.y, world_pos.z],
@@ -535,7 +535,7 @@ impl PhotonMap {
                         volume_color += color;
                     }
 
-                    if rng.gen::<f64>() < 0.00001 {
+                    if rng.gen::<f64>() < 0.00000001 {
                         dbg!(c);
                         dbg!(intersected_beams.len());
                     }
@@ -563,7 +563,7 @@ impl PhotonMap {
                             let volume_color = volume_estimate(medium, Some(&h), Some(object), rng);
                             let surface_color = surface_estimate(&h, &material, rng)
                                 * medium.transmittence(&ray, h.time, 0., rng);
-                            if rng.gen::<f64>() < 0.00001 {
+                            if rng.gen::<f64>() < 0.000001 {
                                 println!("Surface: {}, volume: {}", surface_color, volume_color);
                             }
                             surface_color + volume_color
@@ -800,8 +800,7 @@ impl<'a> Renderer<'a> {
                 let scat = medium.scattering(&collision);
                 let extinction = abs + scat;
 
-                // TODO: add back d_pdf term
-                let attenuated_power = power * medium.transmittence(&ray, d, 0.0, rng); // / d_pdf;
+                let attenuated_power = power * medium.transmittence(&ray, d, 0.0, rng);
                 let rr_prob = scat / extinction;
                 let mut next_photons = if rng.gen::<f64>() < rr_prob {
                     let (wi, ph_p) = medium.sample_ph(&wo, rng);
@@ -856,7 +855,7 @@ impl<'a> Renderer<'a> {
                     } else {
                         // no scattering event
                         trace_on_surface(
-                            power * medium.transmittence(&ray, h.time, 0.0, rng), // / (d_cdf),
+                            power * medium.transmittence(&ray, h.time, 0.0, rng),
                             &h,
                             object,
                             rng,
