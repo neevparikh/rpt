@@ -291,7 +291,6 @@ impl<'a> Renderer<'a> {
                 surface_color
             }
         } else {
-            panic!("testing");
             match self.get_closest_hit(ray) {
                 None => self.scene.environment.get_color(&ray.dir),
                 Some((h, object)) => {
