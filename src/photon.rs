@@ -212,21 +212,7 @@ impl PhotonMap {
     }
 
     fn new_beam_map_for_beam_estimate(list: PhotonList, rng: &mut StdRng) -> Self {
-        let volume_list = list
-            .clone()
-            .1
-            .into_iter()
-            .filter_map(|x| {
-                let thresh = 0.001;
-                if rng.gen::<f64>() < thresh {
-                    let mut new_photon = x.clone();
-                    new_photon.power /= thresh;
-                    Some(new_photon)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+        let volume_list = list.clone().1;
 
         let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
@@ -724,6 +710,24 @@ impl<'a> Renderer<'a> {
                     // / pdf / pdf_of_sample,
                     rng,
                     0,
+                );
+
+                let PhotonList(surface, volume) = photons;
+                let photons = PhotonList(
+                    surface,
+                    volume
+                        .into_iter()
+                        .filter_map(|x| {
+                            let thresh = 0.001;
+                            if rng.gen::<f64>() < thresh {
+                                let mut new_photon = x.clone();
+                                new_photon.power /= thresh;
+                                Some(new_photon)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>(),
                 );
 
                 return photons;
