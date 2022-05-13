@@ -4,7 +4,6 @@
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
 use std::fs;
-use std::time::Instant;
 
 use rpt::*;
 
@@ -137,16 +136,16 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(front_shade).material(yellow));
     scene.add(Object::new(back_shade).material(yellow));
 
-    let absorb = 0.001;
+    let absorb = 0.0001;
     let scat = 0.001;
     let size = 256;
     let bounce = 10;
-    let sample = 150;
-    let watts = 75.;
-    let photons = 10_000_000;
+    let sample = 10;
+    let watts = 2.;
+    let photons = 20_000_000;
 
-    let gather_size = 100;
-    let gather_size_volume = 30;
+    let gather_size = 3;
+    let gather_size_volume = 3;
 
     let light_mtl = Material::light(hex_color(0xFFFEFA), watts); // 6500 K
     scene.add((light_rect, light_mtl));
@@ -161,11 +160,11 @@ fn main() -> color_eyre::Result<()> {
         .gather_size(gather_size)
         .watts(watts * photons as f64)
         .gather_size_volume(gather_size_volume)
-        .photon_point_query_beam_render(photons);
+        .photon_beam_query_beam_render(photons);
 
     image
         .save(format!(
-            "vpm/beam_lamp/g_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            "vpm/beam_lamp/f_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
             size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");

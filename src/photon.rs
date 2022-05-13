@@ -238,17 +238,18 @@ impl PhotonMap {
         let mut beams = volume_list
             .into_iter()
             .map(|p| {
-                let max_distance_to_neighbor = volume_map
-                    .nearests(&p, 3)
-                    .into_iter()
-                    .map(
-                        |ItemAndDistance {
-                             squared_distance, ..
-                         }| squared_distance,
-                    )
-                    .fold(-1., f64::max)
-                    .sqrt();
-                // let max_distance_to_neighbor = 4.;
+                // let max_distance_to_neighbor = volume_map
+                //     .nearests(&p, 3)
+                //     .into_iter()
+                //     .map(
+                //         |ItemAndDistance {
+                //              squared_distance, ..
+                //          }| squared_distance,
+                //     )
+                //     .fold(-1., f64::max)
+                //     .sqrt()
+                //     / 10.0;
+                let max_distance_to_neighbor = 10.;
                 let beam = PhotonBeam {
                     start_position: p.starting_position.clone(),
                     end_position:   p.position,
@@ -296,7 +297,7 @@ impl PhotonMap {
     ) -> Color {
         let wo = -glm::normalize(&ray.dir);
 
-        let surface_estimate = |h: &HitRecord, material: &Material, _rng: &mut StdRng| {
+        let surface_estimate = |h: &HitRecord, material: &Material, rng: &mut StdRng| {
             let world_pos = ray.at(h.time);
             let near_photons = self.surface().nearests(
                 &[world_pos.x, world_pos.y, world_pos.z],
@@ -313,7 +314,7 @@ impl PhotonMap {
                 )
                 .fold(0., |acc: f64, &p: &f64| acc.max(p));
 
-            let mut color = Color::new(0.0, 0.0, 0.0);
+            let mut color = material.emittance() * material.color();
 
             // indirect lighting via photon map
             for ItemAndDistance {
@@ -340,13 +341,8 @@ impl PhotonMap {
             // normalize by (1/(pi * r^2))
             color = color * (1. / (glm::pi::<f64>() * max_dist_squared));
 
-            // TODO: divide by probability of sampling behind surface
-
             // direct lighting via light sampling
-            // color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
-
-            // emitted lighting
-            // color += material.emittance() * material.color();
+            color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
             color
         };
@@ -490,7 +486,7 @@ impl PhotonMap {
 
                     let dummy_pos = glm::vec3(0., 0., 0.);
                     let medium_color = medium.color(&dummy_pos);
-                    let scat = medium.scattering(&dummy_pos);
+                    let extinction = medium.extinction(&dummy_pos);
 
                     let mut volume_color = Color::new(0., 0., 0.);
 
@@ -504,7 +500,7 @@ impl PhotonMap {
                     for beam in intersected_beams.iter() {
                         let l = beam.start_position - ray.origin;
                         let u = glm::normalize(&l.cross(&beam.ray.dir));
-                        let n = beam.ray.dir.cross(&u);
+                        let n = glm::normalize(&beam.ray.dir.cross(&u));
                         let t = n.dot(&l) / n.dot(&ray.dir);
                         let query_collision = ray.at(t);
 
@@ -515,7 +511,7 @@ impl PhotonMap {
                         }
 
                         let inv_sin_theta =
-                            1.0 / 0.0_f64.max(1.0 - ray.dir.dot(&beam.ray.dir).powi(2)).sqrt();
+                            1.0 / ((0.0_f64.max(1.0 - ray.dir.dot(&beam.ray.dir).powi(2))).sqrt());
 
                         let beam_t = beam.ray.dir.dot(&(query_collision - beam.start_position));
 
@@ -538,14 +534,14 @@ impl PhotonMap {
 
                         c += 1;
 
-                        let color = scat
+                        let color = extinction
                             * beam.power.component_mul(&medium_color)
                             * medium.phase(&(-beam.ray.dir), &(-ray.dir))
                             * inv_sin_theta
                             * medium.transmittence(&ray, t, 0.0, rng)
                             * medium.transmittence(&r, beam_t, 0.0, rng)
-                            * k2(dist / beam.radius)
-                            / beam.radius;
+                            // * k2(dist / beam.radius)
+                            / (2.0 * beam.radius);
 
                         volume_color += color;
                     }

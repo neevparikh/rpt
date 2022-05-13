@@ -120,7 +120,6 @@ fn main() -> color_eyre::Result<()> {
     Renderer::new(&scene, camera)
         .width(512)
         .height(512)
-        .filter(Filter::Box(1))
         .max_bounces(4)
         .num_samples(5000)
         .iterative_render(1000, |iteration, buffer| {
