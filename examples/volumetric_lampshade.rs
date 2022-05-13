@@ -25,7 +25,6 @@ fn main() -> color_eyre::Result<()> {
     let red = Material::diffuse(hex_color(0xBC0000));
     let yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 500.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -107,19 +106,21 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
 
-    // scene.add(Object::new(right_shade).material(yellow));
-    // scene.add(Object::new(left_shade).material(yellow));
-    // scene.add(Object::new(front_shade).material(yellow));
-    // scene.add(Object::new(back_shade).material(yellow));
+    scene.add(Object::new(right_shade).material(yellow));
+    scene.add(Object::new(left_shade).material(yellow));
+    scene.add(Object::new(front_shade).material(yellow));
+    scene.add(Object::new(back_shade).material(yellow));
 
-    scene.add((light_rect, light_mtl));
-
-    let absorb = 0.0008;
-    let scat = 0.0008;
+    let absorb = 0.0001;
+    let scat = 0.001;
     let bounce = 10;
-    let size = 512;
+    let size = 256;
     let sample = 4000;
     let every_x = 1000;
+    let watts = 150.0;
+
+    let light_mtl = Material::light(hex_color(0xFFFEFA), watts); // 6500 K
+    scene.add((light_rect, light_mtl));
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 

@@ -188,17 +188,15 @@ impl<'a> Renderer<'a> {
             let medium = &self.scene.media[0];
 
             // sample distance along ray:
-            let (d, d_pdf, d_cdf) = medium.sample_d(&ray, rng);
+            let rr_p = 0.8;
+            let (d, _, _) = medium.sample_d(&ray, rng);
 
             let wo = -glm::normalize(&ray.dir);
-            // let rr_p: f64 = rng.gen_range(0.0..1.0);
             let (max_dist, surface_color) = match self.get_closest_hit(ray) {
                 None => {
                     let background_dist = 400.0;
                     let color = if d >= background_dist {
-                        medium.transmittence(&ray, background_dist, 0.0, rng)
-                            * self.scene.environment.get_color(&ray.dir)
-                            / d_cdf
+                        self.scene.environment.get_color(&ray.dir)
                     } else {
                         glm::vec3(0.0, 0.0, 0.0)
                     };
@@ -219,7 +217,6 @@ impl<'a> Renderer<'a> {
 
                         color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
-                        let rr_p = 0.3;
                         if rng.gen::<f64>() < rr_p {
                             if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
                                 let f = material.bsdf(&h.normal, &wo, &wi);
@@ -230,12 +227,10 @@ impl<'a> Renderer<'a> {
                                 let indirect = 1.0 / (pdf * rr_p)
                                     * f.component_mul(&self.trace_ray(ray, num_bounces + 1, rng))
                                     * wi.dot(&h.normal).abs();
-                                color.x += indirect.x.min(FIREFLY_CLAMP);
-                                color.y += indirect.y.min(FIREFLY_CLAMP);
-                                color.z += indirect.z.min(FIREFLY_CLAMP);
+                                color += indirect;
                             }
                         }
-                        medium.transmittence(&ray, h.time, 0.0, rng) * color / d_cdf
+                        color
                     } else {
                         glm::vec3(0.0, 0.0, 0.0)
                     };
@@ -245,23 +240,22 @@ impl<'a> Renderer<'a> {
 
             if d < max_dist {
                 let collision = ray.at(d);
-                let _abs = medium.absorption(&collision);
+                let abs = medium.absorption(&collision);
                 let emm = medium.emission(&collision);
                 let medium_color = medium.color(&collision);
                 let scat = medium.scattering(&collision);
+                let extinction = abs + scat;
 
-                // let mut color = if num_bounces == 0 {
-                //     emm * medium_color
-                // } else {
-                //     glm::vec3(0.0, 0.0, 0.0)
-                // };
+                let mut color = if num_bounces == 0 {
+                    emm * medium_color
+                } else {
+                    glm::vec3(0.0, 0.0, 0.0)
+                };
 
-                let mut color = emm * medium_color;
+                // let mut color = emm * medium_color;
 
                 // direct lighting for media particle
-                // color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
-
-                let rr_p = 0.8;
+                color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
 
                 if rng.gen::<f64>() < rr_p {
                     let (wi, ph_p) = medium.sample_ph(&wo, rng);
@@ -272,7 +266,8 @@ impl<'a> Renderer<'a> {
                     };
 
                     // compute scattered light recursively
-                    let mut indirect = scat * self.trace_ray(new_ray, num_bounces + 1, rng);
+                    let mut indirect =
+                        (scat / extinction) * self.trace_ray(new_ray, num_bounces + 1, rng);
 
                     // note that there is no cosine factor, because the media is a
                     // point-like sphere
@@ -280,12 +275,8 @@ impl<'a> Renderer<'a> {
                     indirect = indirect.component_mul(&medium_color) * medium.phase(&wo, &wi);
                     indirect /= rr_p;
 
-                    color.x += indirect.x.min(FIREFLY_CLAMP);
-                    color.y += indirect.y.min(FIREFLY_CLAMP);
-                    color.z += indirect.z.min(FIREFLY_CLAMP);
+                    color += indirect;
                 }
-                color *= medium.transmittence(&ray, d, 0.0, rng);
-                color /= d_pdf;
                 color
             } else {
                 surface_color
@@ -338,6 +329,7 @@ impl<'a> Renderer<'a> {
     ) -> Color {
         let mut color = glm::vec3(0.0, 0.0, 0.0);
         let scat = medium.scattering(pos);
+        let ext = medium.extinction(pos);
         let medium_color = medium.color(pos);
         for light in &self.scene.lights {
             if let Light::Ambient(ambient_color) = light {
@@ -356,10 +348,7 @@ impl<'a> Renderer<'a> {
                         let ph = medium.phase(wo, &wi);
                         // radiance from the light is scattered and diminished by media
                         // note that there is no cosine factor
-                        let transmittence = medium.transmittence(&ray, dist_to_light, 0.0, rng);
-                        let additional_color =
-                            scat * transmittence * &intensity.component_mul(&medium_color) * ph;
-                        color += additional_color;
+                        color += (scat / ext) * &intensity.component_mul(&medium_color) * ph;
                     }
                 }
             }
@@ -404,12 +393,12 @@ impl<'a> Renderer<'a> {
                 if let Some(hit) = closest_hit {
                     if (hit - dist_to_light).abs() < EPSILON {
                         let f = material.bsdf(n, wo, &wi);
-                        let mut additional_color = f.component_mul(&intensity) * wi.dot(n);
-                        if let Some(medium) = medium {
-                            let transmittence = medium.transmittence(&ray, dist_to_light, 0.0, rng);
-                            additional_color *= transmittence; // / (1.0 - transmittence);
-                        }
-                        color += additional_color;
+                        // let mut additional_color = f.component_mul(&intensity) * wi.dot(n);
+                        // if let Some(medium) = medium {
+                        //     let transmittence = medium.transmittence(&ray, dist_to_light, 0.0,
+                        // rng);     additional_color *= transmittence; // /
+                        // (1.0 - transmittence); }
+                        color += f.component_mul(&intensity) * wi.dot(n);
                     }
                 }
             }
