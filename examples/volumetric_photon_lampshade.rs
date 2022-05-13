@@ -142,7 +142,7 @@ fn main() -> color_eyre::Result<()> {
 
     let absorb = 0.0008;
     let scat = 0.0008;
-    let size = 1024;
+    let size = 512;
     let bounce = 10;
     let sample = 100;
     let watts = 14_000_000.;
@@ -153,6 +153,7 @@ fn main() -> color_eyre::Result<()> {
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
+    fs::create_dir_all("vpm/beam_lamp/")?;
     let image = Renderer::new(&scene, camera)
         .width(size)
         .height(size)
@@ -162,7 +163,7 @@ fn main() -> color_eyre::Result<()> {
         .gather_size(gather_size)
         .watts(watts)
         .gather_size_volume(gather_size_volume)
-        .photon_beam_render(photons);
+        .photon_point_query_beam_render(photons);
 
     image
         .save(format!(

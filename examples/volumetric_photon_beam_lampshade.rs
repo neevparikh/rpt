@@ -23,8 +23,9 @@ fn main() -> color_eyre::Result<()> {
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
+    let yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
+    let light_mtl = Material::light(hex_color(0xFFFEFA), 120.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -38,12 +39,64 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
     ]);
+
+    // width 130, depth 105
     let light_rect = polygon(&[
-        glm::vec3(343.0, 548.8, 227.0),
-        glm::vec3(343.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 227.0),
+        glm::vec3(330.0, 548.8, 240.0),
+        glm::vec3(330.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 240.0),
     ]);
+
+    // let shift = glm::vec3(0.0, 70.0, 0.0);
+    // let front_shade = polygon(&[
+    //     glm::vec3(343.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 332.0) - shift,
+    //     glm::vec3(343.0, 548.99, 332.0),
+    //     glm::vec3(343.0, 548.99, 227.0),
+    // ]);
+    // let left_shade = polygon(&[
+    //     glm::vec3(343.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 332.0),
+    //     glm::vec3(343.0, 548.99, 332.0),
+    // ]);
+    // let back_shade = polygon(&[
+    //     glm::vec3(213.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 227.0) - shift,
+    //     glm::vec3(213.0, 548.99, 227.0),
+    //     glm::vec3(213.0, 548.99, 332.0),
+    // ]);
+    // let right_shade = polygon(&[
+    //     glm::vec3(213.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 227.0),
+    //     glm::vec3(213.0, 548.99, 227.0),
+    // ]);
+
+    let height = 140.;
+    let depth = 105.;
+    let width = 130.;
+    let center = glm::vec3(213. + 65., 548., 227. + 55.);
+    let front_offset = center + glm::vec3(0., 0., depth / 2.);
+    let left_offset = center + glm::vec3(-width / 2., 0., 0.);
+    let back_offset = center + glm::vec3(0., 0., -depth / 2.);
+    let right_offset = center + glm::vec3(width / 2., 0., 0.);
+
+    let off_axis_size = 10.;
+    let front_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&front_offset);
+    let left_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&left_offset);
+    let back_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&back_offset);
+    let right_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&right_offset);
+
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
@@ -79,34 +132,41 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(right_wall).material(green));
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
-    scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    let absorb = 0.002;
-    let scat = 0.002;
+    scene.add(Object::new(right_shade).material(yellow));
+    scene.add(Object::new(left_shade).material(yellow));
+    scene.add(Object::new(front_shade).material(yellow));
+    scene.add(Object::new(back_shade).material(yellow));
+
+    scene.add((light_rect, light_mtl));
+
+    let absorb = 0.001;
+    let scat = 0.001;
     let size = 256;
     let bounce = 10;
-    let sample = 20;
-    let watts = 100_000.;
-    let photons = 2_000_000;
-    let gather_size = 200;
-    let gather_size_volume = 100;
+    let sample = 50;
+    let watts = 14_000_000.;
+    let photons = 10_000;
+
+    let gather_size = 10;
+    let gather_size_volume = 30;
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
+    fs::create_dir_all("vpm/beam_lamp/")?;
     let image = Renderer::new(&scene, camera)
         .width(size)
         .height(size)
-        // .filter(Filter::Box(1))
         .max_bounces(bounce)
         .num_samples(sample)
-        .watts(watts)
         .gather_size(gather_size)
+        .watts(watts)
         .gather_size_volume(gather_size_volume)
-        .photon_point_query_beam_render(photons);
+        .photon_beam_query_beam_render(photons);
 
     image
         .save(format!(
-            "vpm/bvh/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            "vpm/beam_lamp/q_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
             size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");

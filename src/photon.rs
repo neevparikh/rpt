@@ -22,9 +22,10 @@ use crate::{HitRecord, Medium, Object, Renderer};
 
 #[derive(Debug, Clone)]
 struct Photon {
-    pub position:  glm::DVec3,
-    pub direction: glm::DVec3,
-    pub power:     glm::DVec3,
+    pub position:          glm::DVec3,
+    pub direction:         glm::DVec3,
+    pub power:             glm::DVec3,
+    pub starting_position: glm::DVec3,
 }
 
 impl KdPoint for Photon {
@@ -35,12 +36,61 @@ impl KdPoint for Photon {
     }
 }
 
+struct PhotonBeam {
+    pub start_position: glm::DVec3,
+    pub end_position:   glm::DVec3,
+    pub radius:         f64,
+    pub node_index:     usize,
+    pub ray:            Ray,
+    pub power:          glm::DVec3,
+}
+
 struct PhotonSphere {
     pub position:   glm::DVec3,
     pub radius:     f64,
     pub node_index: usize,
     pub direction:  glm::DVec3,
     pub power:      glm::DVec3,
+}
+
+impl Bounded for PhotonBeam {
+    fn aabb(&self) -> AABB {
+        let ax = self.start_position.x;
+        let ay = self.start_position.y;
+        let az = self.start_position.z;
+
+        let bx = self.end_position.x;
+        let by = self.end_position.y;
+        let bz = self.end_position.z;
+
+        let cx_sq = (ax - bx).powi(2);
+        let cy_sq = (ay - by).powi(2);
+        let cz_sq = (az - bz).powi(2);
+
+        let sq_sum = cx_sq + cy_sq + cz_sq;
+
+        let kx = ((cy_sq + cz_sq) / sq_sum).sqrt();
+        let ky = ((cx_sq + cz_sq) / sq_sum).sqrt();
+        let kz = ((cx_sq + cy_sq) / sq_sum).sqrt();
+
+        let adjustment = glm::vec3(kx * self.radius, ky * self.radius, kz * self.radius);
+
+        let min = glm::vec3(ax.min(bx), ay.min(by), az.min(bz)) - adjustment;
+        let max = glm::vec3(ax.max(bx), ay.max(by), az.max(bz)) + adjustment;
+
+        AABB::with_bounds(
+            Point3::new(min.x as f32, min.y as f32, min.z as f32),
+            Point3::new(max.x as f32, max.y as f32, max.z as f32),
+        )
+    }
+}
+impl BHShape for PhotonBeam {
+    fn bh_node_index(&self) -> usize {
+        self.node_index
+    }
+    fn set_bh_node_index(&mut self, index: usize) {
+        self.node_index = index;
+    }
 }
 
 impl Bounded for PhotonSphere {
@@ -102,6 +152,7 @@ impl std::fmt::Display for PhotonList {
 enum PhotonMap {
     PointMapForPointEstimate(KdTree<Photon>, KdTree<Photon>),
     PointMapForBeamEstimate(KdTree<Photon>, BVH, Vec<PhotonSphere>),
+    BeamMapForBeamEstimate(KdTree<Photon>, BVH, Vec<PhotonBeam>),
 }
 
 impl PhotonMap {
@@ -114,6 +165,7 @@ impl PhotonMap {
         });
         Self::PointMapForPointEstimate(surface_map, volume_map)
     }
+
     fn new_point_map_for_beam_estimate(list: PhotonList) -> Self {
         let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
@@ -158,12 +210,68 @@ impl PhotonMap {
 
         Self::PointMapForBeamEstimate(surface_map, bvh, spheres)
     }
+
+    fn new_beam_map_for_beam_estimate(list: PhotonList) -> Self {
+        let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
+            a.position[k].partial_cmp(&b.position[k]).unwrap()
+        });
+        let volume_map = KdTree::build_by(list.clone().1, |a, b, k| {
+            a.position[k].partial_cmp(&b.position[k]).unwrap()
+        });
+
+        let mut beams = list
+            .1
+            .into_iter()
+            .map(|p| {
+                let max_distance_to_neighbor = volume_map
+                    .nearests(&p, 3)
+                    .into_iter()
+                    .map(
+                        |ItemAndDistance {
+                             squared_distance, ..
+                         }| squared_distance,
+                    )
+                    .fold(-1., f64::max)
+                    .sqrt();
+                // let max_distance_to_neighbor = 4.;
+                let beam = PhotonBeam {
+                    start_position: p.starting_position.clone(),
+                    end_position:   p.position,
+                    radius:         max_distance_to_neighbor,
+                    ray:            Ray {
+                        origin: p.starting_position,
+                        dir:    glm::normalize(&(p.position - p.starting_position)),
+                    },
+                    power:          p.power,
+                    node_index:     0,
+                };
+                return beam;
+            })
+            .collect::<Vec<_>>();
+
+        let avg = beams.iter().map(|s| s.radius).sum::<f64>() / beams.len() as f64;
+        let max = beams.iter().map(|s| s.radius).fold(0., f64::max);
+        let min = beams.iter().map(|s| s.radius).fold(0., f64::min);
+        println!(
+            "Finished calculating photon beam radiuses {:?}",
+            (avg, max, min)
+        );
+
+        println!("Building BVH");
+        let bvh = BVH::build(beams.as_mut_slice());
+
+        Self::BeamMapForBeamEstimate(surface_map, bvh, beams)
+    }
+
     fn surface(&self) -> &KdTree<Photon> {
         match self {
             Self::PointMapForPointEstimate(surface_map, _) => surface_map,
             Self::PointMapForBeamEstimate(surface_map, _, _) => surface_map,
+            Self::BeamMapForBeamEstimate(surface_map, _, _) => surface_map,
+            // _ => todo!(),
         }
     }
+
     fn estimate_indirect(
         &self,
         renderer: &Renderer,
@@ -198,6 +306,16 @@ impl PhotonMap {
                 squared_distance: _,
             } in near_photons
             {
+                let disp = world_pos - photon.position;
+                let r = Ray {
+                    origin: photon.position,
+                    dir:    glm::normalize(&disp),
+                };
+                if let Some((hit, _)) = renderer.get_closest_hit(r) {
+                    if disp.norm() > hit.time {
+                        continue;
+                    }
+                }
                 color += material
                     .bsdf(&h.normal, &wo, &photon.direction)
                     .component_mul(&photon.power)
@@ -210,7 +328,7 @@ impl PhotonMap {
             // TODO: divide by probability of sampling behind surface
 
             // direct lighting via light sampling
-            color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
+            // color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
             // emitted lighting
             // color += material.emittance() * material.color();
@@ -228,7 +346,8 @@ impl PhotonMap {
                     if hit.is_none() || d < hit.unwrap().time {
                         let collision = ray.at(d);
                         let abs = medium.absorption(&collision);
-                        let emm = medium.emission(&collision);
+                        let _emm = medium.emission(&collision);
+                        let medium_color = medium.color(&collision);
                         let scat = medium.scattering(&collision);
                         let extinction = abs + scat;
 
@@ -258,7 +377,7 @@ impl PhotonMap {
                             squared_distance: _,
                         } in near_photons
                         {
-                            color += photon.power.component_mul(&emm)
+                            color += photon.power.component_mul(&medium_color)
                                 * medium.phase(&wo, &photon.direction);
                         }
                         color /= (4. / 3.) * glm::pi::<f64>() * max_dist_squared.powf(1.5);
@@ -292,7 +411,8 @@ impl PhotonMap {
 
                     let dummy_pos = glm::vec3(0., 0., 0.);
                     let abs = medium.absorption(&dummy_pos);
-                    let emm = medium.emission(&dummy_pos);
+                    let _emm = medium.emission(&dummy_pos);
+                    let medium_color = medium.color(&dummy_pos);
                     let scat = medium.scattering(&dummy_pos);
                     let extinction = abs + scat;
 
@@ -331,28 +451,102 @@ impl PhotonMap {
 
                             let transmittance = (-extinction * disk_distance).exp();
                             volume_color += transmittance
-                                * photon.power.component_mul(&emm)
+                                * photon.power.component_mul(&medium_color)
                                 * medium.phase(&wi, &(-ray.dir))
                                 * weight
                                 * scale_factor;
                         }
-
-                        if rng.gen::<f64>() < 0.00000001 {
-                            dbg!(origin_to_center);
-                            dbg!(radius_squared);
-                            dbg!(disk_distance);
-                            dbg!(distance_squared);
-                        }
                     }
 
                     return volume_color;
+                }
+                Self::BeamMapForBeamEstimate(_, bvh, beams) => {
+                    let intersected_beams = bvh.traverse(
+                        &BvhRay::new(
+                            Point3::new(
+                                ray.origin.x as f32,
+                                ray.origin.y as f32,
+                                ray.origin.z as f32,
+                            ),
+                            Point3::new(ray.dir.x as f32, ray.dir.y as f32, ray.dir.z as f32),
+                        ),
+                        beams.as_slice(),
+                    );
+
+                    let dummy_pos = glm::vec3(0., 0., 0.);
+                    let medium_color = medium.color(&dummy_pos);
+                    let scat = medium.scattering(&dummy_pos);
+
+                    let mut volume_color = Color::new(0., 0., 0.);
+
+                    let mut c = 0;
+
+                    let k2 = |square_param: f64| {
+                        let tmp = 1. - square_param;
+                        return (3. / glm::pi::<f64>()) * tmp * tmp;
+                    };
+
+                    for beam in intersected_beams.iter() {
+                        let l = beam.start_position - ray.origin;
+                        let u = glm::normalize(&l.cross(&beam.ray.dir));
+                        let n = beam.ray.dir.cross(&u);
+                        let t = n.dot(&l) / n.dot(&ray.dir);
+                        let query_collision = ray.at(t);
+
+                        if let Some(hit) = hit {
+                            if t >= hit.time {
+                                continue;
+                            }
+                        }
+
+                        let inv_sin_theta =
+                            1.0 / 0.0_f64.max(1.0 - ray.dir.dot(&beam.ray.dir).powi(2)).sqrt();
+
+                        let beam_t = beam.ray.dir.dot(&(query_collision - beam.start_position));
+
+                        let beam_len = (beam.end_position - beam.start_position).norm();
+                        if beam_t < 0.0 || beam_t > beam_len {
+                            continue;
+                        }
+
+                        let beam_collision = beam.ray.at(beam_t);
+
+                        let dist = (query_collision - beam_collision).norm();
+                        if dist >= beam.radius {
+                            continue;
+                        }
+
+                        let r = Ray {
+                            origin: beam_collision,
+                            dir:    -beam.ray.dir.clone(),
+                        };
+
+                        c += 1;
+
+                        let color = scat
+                            * beam.power.component_mul(&medium_color)
+                            * medium.phase(&(-beam.ray.dir), &(-ray.dir))
+                            * inv_sin_theta
+                            * medium.transmittence(&ray, t, 0.0, rng)
+                            * medium.transmittence(&r, beam_t, 0.0, rng)
+                            * k2(dist / beam.radius)
+                            / beam.radius;
+
+                        volume_color += color;
+                    }
+
+                    if rng.gen::<f64>() < 0.00001 {
+                        dbg!(c);
+                        dbg!(intersected_beams.len());
+                    }
+                    volume_color
                 }
             }
         };
 
         match renderer.get_closest_hit(*ray) {
             None => match medium {
-                None => renderer.scene.environment.get_color(&ray.dir),
+                None => renderer.scene.environment.get_color(&ray.dir), // TODO attenuate
                 Some(m) => volume_estimate(m, None, None, rng),
             },
             Some((h, object)) => {
@@ -361,9 +555,11 @@ impl PhotonMap {
                     None => surface_estimate(&h, &material, rng),
                     Some(medium) => match self {
                         Self::PointMapForPointEstimate(_, _) => {
-                            volume_estimate(&medium, None, None, rng)
+                            // NOTE: surface color happens inside
+                            volume_estimate(&medium, Some(&h), Some(object), rng)
                         }
-                        Self::PointMapForBeamEstimate(_, _, _) => {
+                        Self::PointMapForBeamEstimate(_, _, _)
+                        | Self::BeamMapForBeamEstimate(_, _, _) => {
                             let volume_color = volume_estimate(medium, Some(&h), Some(object), rng);
                             let surface_color = surface_estimate(&h, &material, rng)
                                 * medium.transmittence(&ray, h.time, 0., rng);
@@ -381,12 +577,17 @@ impl PhotonMap {
 
 pub enum PhotonRenderKind {
     PhotonMap,
-    PhotonBeam,
+    PhotonPointBeam,
+    PhotonBeamBeam,
 }
 
 impl<'a> Renderer<'a> {
-    pub fn photon_beam_render(&self, photon_count: usize) -> RgbImage {
-        self.photon_render(photon_count, PhotonRenderKind::PhotonBeam)
+    pub fn photon_point_query_beam_render(&self, photon_count: usize) -> RgbImage {
+        self.photon_render(photon_count, PhotonRenderKind::PhotonPointBeam)
+    }
+
+    pub fn photon_beam_query_beam_render(&self, photon_count: usize) -> RgbImage {
+        self.photon_render(photon_count, PhotonRenderKind::PhotonBeamBeam)
     }
 
     pub fn photon_map_render(&self, photon_count: usize) -> RgbImage {
@@ -441,7 +642,12 @@ impl<'a> Renderer<'a> {
         println!("Building kdtree");
         let photon_map = match kind {
             PhotonRenderKind::PhotonMap => PhotonMap::new_point_map_for_point_estimate(photon_list),
-            PhotonRenderKind::PhotonBeam => PhotonMap::new_point_map_for_beam_estimate(photon_list),
+            PhotonRenderKind::PhotonPointBeam => {
+                PhotonMap::new_point_map_for_beam_estimate(photon_list)
+            }
+            PhotonRenderKind::PhotonBeamBeam => {
+                PhotonMap::new_beam_map_for_beam_estimate(photon_list)
+            }
         };
 
         println!("Tracing rays");
@@ -571,6 +777,7 @@ impl<'a> Renderer<'a> {
                                 position: world_pos,
                                 direction: wo,
                                 power,
+                                starting_position: ray.origin,
                             });
                         }
                         next_photons
@@ -588,7 +795,8 @@ impl<'a> Renderer<'a> {
             |power: glm::DVec3, medium: &Medium, d: f64, _d_pdf: f64, rng: &mut StdRng| {
                 let collision = ray.at(d);
                 let abs = medium.absorption(&collision);
-                let emm = medium.emission(&collision);
+                let _emm = medium.emission(&collision);
+                let medium_color = medium.color(&collision);
                 let scat = medium.scattering(&collision);
                 let extinction = abs + scat;
 
@@ -605,7 +813,8 @@ impl<'a> Renderer<'a> {
                     // compute scattered light recursively
                     self.trace_photon(
                         new_ray,
-                        attenuated_power.component_mul(&emm) * medium.phase(&wo, &wi) / ph_p,
+                        attenuated_power.component_mul(&medium_color) * medium.phase(&wo, &wi)
+                            / ph_p,
                         rng,
                         num_bounces + 1,
                     )
@@ -615,10 +824,11 @@ impl<'a> Renderer<'a> {
 
                 // add current photon
                 next_photons.add_volume(Photon {
-                    position:  collision,
-                    direction: wo,
-                    power:     attenuated_power
+                    position:          collision,
+                    direction:         wo,
+                    power:             attenuated_power
                         + self.sample_lights_for_media(&medium, &collision, &wo, rng),
+                    starting_position: ray.origin,
                 });
 
                 next_photons
