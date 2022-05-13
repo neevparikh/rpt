@@ -136,13 +136,13 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(front_shade).material(yellow));
     scene.add(Object::new(back_shade).material(yellow));
 
-    let absorb = 0.0001;
-    let scat = 0.001;
+    let absorb = 0.00005;
+    let scat = 0.003;
     let size = 256;
     let bounce = 10;
-    let sample = 10;
-    let watts = 2.;
-    let photons = 20_000_000;
+    let sample = 2000;
+    let watts = 100000.0 / (130.0 * 105.0);
+    let photons = 10_000_000;
 
     let gather_size = 3;
     let gather_size_volume = 3;
@@ -164,7 +164,7 @@ fn main() -> color_eyre::Result<()> {
 
     image
         .save(format!(
-            "vpm/beam_lamp/f_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            "vpm/beam_lamp/w_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
             size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");

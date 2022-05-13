@@ -82,7 +82,7 @@ impl Medium {
             absorption: Box::new(move |_| absorption),
             scattering: Box::new(move |_| scattering),
             emission:   Box::new(move |_| 0.0),
-            color:      Box::new(move |_| hex_color(0xAAAAAA)), // 0xD2B48C
+            color:      Box::new(move |_| hex_color(0xD2B48C)), // 0xD2B48C
             phase:      Box::new(move |_, _| 1.0 / (4.0 * glm::pi::<f64>())),
             sample_ph:  Box::new(move |_, rng| {
                 let wo = glm::vec3(

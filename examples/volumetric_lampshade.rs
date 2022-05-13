@@ -111,11 +111,11 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(front_shade).material(yellow));
     scene.add(Object::new(back_shade).material(yellow));
 
-    let absorb = 0.0001;
-    let scat = 0.001;
+    let absorb = 0.00005;
+    let scat = 0.003;
     let bounce = 10;
     let size = 256;
-    let sample = 4000;
+    let sample = 5000;
     let every_x = 1000;
     let watts = 150.0;
 

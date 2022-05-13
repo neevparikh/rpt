@@ -231,9 +231,9 @@ impl PhotonMap {
         let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
         });
-        let volume_map = KdTree::build_by(volume_list.clone(), |a, b, k| {
-            a.position[k].partial_cmp(&b.position[k]).unwrap()
-        });
+        // let volume_map = KdTree::build_by(volume_list.clone(), |a, b, k| {
+        //     a.position[k].partial_cmp(&b.position[k]).unwrap()
+        // });
 
         let mut beams = volume_list
             .into_iter()
@@ -249,7 +249,7 @@ impl PhotonMap {
                 //     .fold(-1., f64::max)
                 //     .sqrt()
                 //     / 10.0;
-                let max_distance_to_neighbor = 10.;
+                let max_distance_to_neighbor = 12.;
                 let beam = PhotonBeam {
                     start_position: p.starting_position.clone(),
                     end_position:   p.position,
@@ -342,7 +342,7 @@ impl PhotonMap {
             color = color * (1. / (glm::pi::<f64>() * max_dist_squared));
 
             // direct lighting via light sampling
-            color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
+            // color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
             color
         };
@@ -540,7 +540,7 @@ impl PhotonMap {
                             * inv_sin_theta
                             * medium.transmittence(&ray, t, 0.0, rng)
                             * medium.transmittence(&r, beam_t, 0.0, rng)
-                            // * k2(dist / beam.radius)
+                            * k2(dist / beam.radius)
                             / (2.0 * beam.radius);
 
                         volume_color += color;
@@ -783,12 +783,9 @@ impl<'a> Renderer<'a> {
                         };
 
                         // gather recursive photons with scaled down power
-                        let mut next_photons = self.trace_photon(
-                            ray,
-                            power.component_mul(&f) * cosine_term / pdf / p_d,
-                            rng,
-                            num_bounces + 1,
-                        );
+                        let attenuated_power = power.component_mul(&f) * cosine_term / pdf / p_d;
+                        let mut next_photons =
+                            self.trace_photon(ray, attenuated_power, rng, num_bounces + 1);
                         // add photon from current step
                         if !material.is_mirror() {
                             next_photons.add_surface(Photon {
@@ -818,7 +815,7 @@ impl<'a> Renderer<'a> {
                 let scat = medium.scattering(&collision);
                 let extinction = abs + scat;
 
-                let attenuated_power = power * scat / extinction; //* medium.transmittence(&ray, d, 0.0, rng);
+                let attenuated_power = power.component_mul(&medium_color) * scat / extinction;
                 let rr_prob = scat / extinction;
                 let mut next_photons = if rng.gen::<f64>() < rr_prob {
                     let (wi, ph_p) = medium.sample_ph(&wo, rng);
@@ -830,8 +827,7 @@ impl<'a> Renderer<'a> {
                     // compute scattered light recursively
                     self.trace_photon(
                         new_ray,
-                        attenuated_power.component_mul(&medium_color) * medium.phase(&wo, &wi)
-                            / ph_p, // / _d_pdf,
+                        attenuated_power * medium.phase(&wo, &wi) / ph_p,
                         rng,
                         num_bounces + 1,
                     )
@@ -844,7 +840,6 @@ impl<'a> Renderer<'a> {
                     position: collision,
                     direction: wo,
                     power,
-                    // + self.sample_lights_for_media(&medium, &collision, &wo, rng),
                     starting_position: ray.origin,
                 });
 
