@@ -182,7 +182,7 @@ impl<'a> Renderer<'a> {
     }
 
     /// Trace a ray, obtaining a Monte Carlo estimate of the luminance
-    fn trace_ray(&self, ray: Ray, _num_bounces: u32, rng: &mut StdRng) -> Color {
+    fn trace_ray(&self, ray: Ray, num_bounces: u32, rng: &mut StdRng) -> Color {
         if self.scene.media.len() > 0 {
             // TODO: this should be intersection tests with a bounded mesh of media
             let medium = &self.scene.media[0];
@@ -209,28 +209,30 @@ impl<'a> Renderer<'a> {
                         let world_pos = ray.at(h.time);
                         let material = object.material;
 
-                        let mut color = if _num_bounces == 0 {
+                        let mut color = if num_bounces == 0 {
                             material.emittance() * material.color()
                         } else {
                             glm::vec3(0.0, 0.0, 0.0)
                         };
 
+                        // let mut color = material.emittance() * material.color();
+
                         color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
-                        // maybe use num_bounces in the rr prob
-                        if _num_bounces < self.max_bounces {
+
+                        let rr_p = 0.3;
+                        if rng.gen::<f64>() < rr_p {
                             if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
                                 let f = material.bsdf(&h.normal, &wo, &wi);
                                 let ray = Ray {
                                     origin: world_pos,
                                     dir:    wi,
                                 };
-                                let indirect = 1.0 / pdf
-                                    * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
+                                let indirect = 1.0 / (pdf * rr_p)
+                                    * f.component_mul(&self.trace_ray(ray, num_bounces + 1, rng))
                                     * wi.dot(&h.normal).abs();
                                 color.x += indirect.x.min(FIREFLY_CLAMP);
                                 color.y += indirect.y.min(FIREFLY_CLAMP);
                                 color.z += indirect.z.min(FIREFLY_CLAMP);
-                                // color /= rr_p;
                             }
                         }
                         medium.transmittence(&ray, h.time, 0.0, rng) * color / d_cdf
@@ -243,20 +245,25 @@ impl<'a> Renderer<'a> {
 
             if d < max_dist {
                 let collision = ray.at(d);
-                let abs = medium.absorption(&collision);
+                let _abs = medium.absorption(&collision);
                 let emm = medium.emission(&collision);
+                let medium_color = medium.color(&collision);
                 let scat = medium.scattering(&collision);
 
-                let mut color = if _num_bounces == 0 {
-                    abs * emm
-                } else {
-                    glm::vec3(0.0, 0.0, 0.0)
-                };
+                // let mut color = if num_bounces == 0 {
+                //     emm * medium_color
+                // } else {
+                //     glm::vec3(0.0, 0.0, 0.0)
+                // };
+
+                let mut color = emm * medium_color;
 
                 // direct lighting for media particle
-                color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
+                // color += self.sample_lights_for_media(&medium, &collision, &wo, rng);
 
-                if _num_bounces < self.max_bounces {
+                let rr_p = 0.8;
+
+                if rng.gen::<f64>() < rr_p {
                     let (wi, ph_p) = medium.sample_ph(&wo, rng);
 
                     let new_ray = Ray {
@@ -265,17 +272,18 @@ impl<'a> Renderer<'a> {
                     };
 
                     // compute scattered light recursively
-                    let mut indirect = scat * self.trace_ray(new_ray, _num_bounces + 1, rng);
+                    let mut indirect = scat * self.trace_ray(new_ray, num_bounces + 1, rng);
 
                     // note that there is no cosine factor, because the media is a
                     // point-like sphere
                     indirect /= ph_p;
-                    indirect *= medium.phase(&wo, &wi);
+                    indirect = indirect.component_mul(&medium_color) * medium.phase(&wo, &wi);
+                    indirect /= rr_p;
 
-                    color += indirect;
-                    // color /= rr_p;
+                    color.x += indirect.x.min(FIREFLY_CLAMP);
+                    color.y += indirect.y.min(FIREFLY_CLAMP);
+                    color.z += indirect.z.min(FIREFLY_CLAMP);
                 }
-
                 color *= medium.transmittence(&ray, d, 0.0, rng);
                 color /= d_pdf;
                 color
@@ -291,13 +299,13 @@ impl<'a> Renderer<'a> {
                     let wo = -glm::normalize(&ray.dir);
 
                     // let rr_p: f64 = rng.gen_range(0.0..1.0);
-                    let mut color = if _num_bounces == 0 {
+                    let mut color = if num_bounces == 0 {
                         material.emittance() * material.color()
                     } else {
                         glm::vec3(0.0, 0.0, 0.0)
                     };
                     color += self.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
-                    if _num_bounces < self.max_bounces {
+                    if num_bounces < self.max_bounces {
                         if let Some((wi, pdf)) = material.sample_f(&h.normal, &wo, rng) {
                             let f = material.bsdf(&h.normal, &wo, &wi);
                             let ray = Ray {
@@ -305,7 +313,7 @@ impl<'a> Renderer<'a> {
                                 dir:    wi,
                             };
                             let indirect = 1.0 / pdf
-                                * f.component_mul(&self.trace_ray(ray, _num_bounces + 1, rng))
+                                * f.component_mul(&self.trace_ray(ray, num_bounces + 1, rng))
                                 * wi.dot(&h.normal).abs();
                             color.x += indirect.x.min(FIREFLY_CLAMP);
                             color.y += indirect.y.min(FIREFLY_CLAMP);
@@ -330,10 +338,10 @@ impl<'a> Renderer<'a> {
     ) -> Color {
         let mut color = glm::vec3(0.0, 0.0, 0.0);
         let scat = medium.scattering(pos);
-        let em = medium.emission(pos);
+        let medium_color = medium.color(pos);
         for light in &self.scene.lights {
             if let Light::Ambient(ambient_color) = light {
-                color += ambient_color.component_mul(&em);
+                color += ambient_color.component_mul(&medium_color);
             } else {
                 let (intensity, wi, dist_to_light) = light.illuminate(pos, rng);
                 let ray = Ray {
@@ -348,10 +356,10 @@ impl<'a> Renderer<'a> {
                         let ph = medium.phase(wo, &wi);
                         // radiance from the light is scattered and diminished by media
                         // note that there is no cosine factor
-                        color += scat
-                            * medium.transmittence(&ray, dist_to_light, 0.0, rng)
-                            * &intensity
-                            * ph;
+                        let transmittence = medium.transmittence(&ray, dist_to_light, 0.0, rng);
+                        let additional_color =
+                            scat * transmittence * &intensity.component_mul(&medium_color) * ph;
+                        color += additional_color;
                     }
                 }
             }
