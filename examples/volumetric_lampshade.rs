@@ -23,9 +23,9 @@ fn main() -> color_eyre::Result<()> {
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
-    let yellow = Material::diffuse(hex_color(0x34EB7A));
+    let yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 20.0); // 6500 K
+    let light_mtl = Material::light(hex_color(0xFFFEFA), 500.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -40,39 +40,36 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(0.0, 548.9, 559.2),
     ]);
 
+    // width 130, depth 105
     let light_rect = polygon(&[
-        glm::vec3(343.0, 548.8, 227.0),
-        glm::vec3(343.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 227.0),
+        glm::vec3(330.0, 548.8, 240.0),
+        glm::vec3(330.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 240.0),
     ]);
 
-    let shift = glm::vec3(0.0, 70.0, 0.0);
+    let height = 140.;
+    let depth = 105.;
+    let width = 130.;
+    let center = glm::vec3(213. + 65., 548., 227. + 55.);
+    let front_offset = center + glm::vec3(0., 0., depth / 2.);
+    let left_offset = center + glm::vec3(-width / 2., 0., 0.);
+    let back_offset = center + glm::vec3(0., 0., -depth / 2.);
+    let right_offset = center + glm::vec3(width / 2., 0., 0.);
 
-    let front_shade = polygon(&[
-        glm::vec3(343.0, 548.8, 227.0) - shift,
-        glm::vec3(343.0, 548.8, 332.0) - shift,
-        glm::vec3(343.0, 548.8, 332.0),
-        glm::vec3(343.0, 548.8, 227.0),
-    ]);
-    let left_shade = polygon(&[
-        glm::vec3(343.0, 548.8, 332.0) - shift,
-        glm::vec3(213.0, 548.8, 332.0) - shift,
-        glm::vec3(213.0, 548.8, 332.0),
-        glm::vec3(343.0, 548.8, 332.0),
-    ]);
-    let back_shade = polygon(&[
-        glm::vec3(213.0, 548.8, 332.0) - shift,
-        glm::vec3(213.0, 548.8, 227.0) - shift,
-        glm::vec3(213.0, 548.8, 227.0),
-        glm::vec3(213.0, 548.8, 332.0),
-    ]);
-    let right_shade = polygon(&[
-        glm::vec3(213.0, 548.8, 227.0) - shift,
-        glm::vec3(343.0, 548.8, 227.0) - shift,
-        glm::vec3(343.0, 548.8, 227.0),
-        glm::vec3(213.0, 548.8, 227.0),
-    ]);
+    let off_axis_size = 10.;
+    let front_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&front_offset);
+    let left_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&left_offset);
+    let back_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&back_offset);
+    let right_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&right_offset);
 
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
@@ -110,24 +107,30 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
 
-    scene.add(Object::new(right_shade).material(yellow));
-    scene.add(Object::new(left_shade).material(yellow));
-    scene.add(Object::new(front_shade).material(yellow));
-    scene.add(Object::new(back_shade).material(yellow));
+    // scene.add(Object::new(right_shade).material(yellow));
+    // scene.add(Object::new(left_shade).material(yellow));
+    // scene.add(Object::new(front_shade).material(yellow));
+    // scene.add(Object::new(back_shade).material(yellow));
 
     scene.add((light_rect, light_mtl));
 
-    scene.add(Medium::homogeneous_isotropic(0.00005, 0.0005)); // foggy
+    let absorb = 0.0008;
+    let scat = 0.0008;
+    let bounce = 10;
+    let size = 512;
+    let sample = 4000;
+    let every_x = 1000;
+
+    scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
     fs::create_dir_all("volumetric_results/")?;
     let mut time = Instant::now();
     Renderer::new(&scene, camera)
-        .width(512)
-        .height(512)
-        .filter(Filter::Box(1))
-        .max_bounces(4)
-        .num_samples(2000)
-        .iterative_render(100, |iteration, buffer| {
+        .width(size)
+        .height(size)
+        .max_bounces(bounce)
+        .num_samples(sample)
+        .iterative_render(every_x, |iteration, buffer| {
             let millis = time.elapsed().as_millis();
             println!(
                 "Finished iteration {}, took {} ms, variance: {}",
