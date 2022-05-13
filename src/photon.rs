@@ -408,7 +408,7 @@ impl PhotonMap {
                         // TODO: do we need transmittance here?
                         surface_estimate(&hit.unwrap(), &material, rng)
                             * medium.transmittence(&ray, hit.unwrap().time, 0.0, rng)
-                        //    / d_cdf
+                            / (1. - _d_cdf)
                     }
                 }
                 Self::PointMapForBeamEstimate(_, bvh, spheres) => {
@@ -780,15 +780,21 @@ impl<'a> Renderer<'a> {
                             origin: world_pos,
                             dir:    wi,
                         };
+                        let cosine_term = if wi.dot(&h.normal) > 0. {
+                            wi.dot(&h.normal)
+                        } else {
+                            1.
+                        };
+
                         // gather recursive photons with scaled down power
                         let mut next_photons = self.trace_photon(
                             ray,
-                            power.component_mul(&f) * wi.dot(&h.normal) / pdf / p_d,
+                            power.component_mul(&f) * cosine_term / pdf / p_d,
                             rng,
                             num_bounces + 1,
                         );
                         // add photon from current step
-                        if pdf != 1. {
+                        if !material.is_mirror() {
                             next_photons.add_surface(Photon {
                                 position: world_pos,
                                 direction: wo,
@@ -816,7 +822,7 @@ impl<'a> Renderer<'a> {
                 let scat = medium.scattering(&collision);
                 let extinction = abs + scat;
 
-                let attenuated_power = power * medium.transmittence(&ray, d, 0.0, rng);
+                let attenuated_power = power * scat / extinction; //* medium.transmittence(&ray, d, 0.0, rng);
                 let rr_prob = scat / extinction;
                 let mut next_photons = if rng.gen::<f64>() < rr_prob {
                     let (wi, ph_p) = medium.sample_ph(&wo, rng);
@@ -829,7 +835,7 @@ impl<'a> Renderer<'a> {
                     self.trace_photon(
                         new_ray,
                         attenuated_power.component_mul(&medium_color) * medium.phase(&wo, &wi)
-                            / ph_p,
+                            / ph_p, // / _d_pdf,
                         rng,
                         num_bounces + 1,
                     )
@@ -839,10 +845,10 @@ impl<'a> Renderer<'a> {
 
                 // add current photon
                 next_photons.add_volume(Photon {
-                    position:          collision,
-                    direction:         wo,
-                    power:             attenuated_power
-                        + self.sample_lights_for_media(&medium, &collision, &wo, rng),
+                    position: collision,
+                    direction: wo,
+                    power,
+                    // + self.sample_lights_for_media(&medium, &collision, &wo, rng),
                     starting_position: ray.origin,
                 });
 
@@ -870,12 +876,7 @@ impl<'a> Renderer<'a> {
                         trace_in_volume(power, medium, d, d_pdf, rng)
                     } else {
                         // no scattering event
-                        trace_on_surface(
-                            power * medium.transmittence(&ray, h.time, 0.0, rng),
-                            &h,
-                            object,
-                            rng,
-                        )
+                        trace_on_surface(power, &h, object, rng)
                     }
                 } else {
                     // hit, no medium
