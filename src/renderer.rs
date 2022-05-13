@@ -291,6 +291,7 @@ impl<'a> Renderer<'a> {
                 surface_color
             }
         } else {
+            panic!("testing");
             match self.get_closest_hit(ray) {
                 None => self.scene.environment.get_color(&ray.dir),
                 Some((h, object)) => {
@@ -406,7 +407,8 @@ impl<'a> Renderer<'a> {
                         let f = material.bsdf(n, wo, &wi);
                         let mut additional_color = f.component_mul(&intensity) * wi.dot(n);
                         if let Some(medium) = medium {
-                            additional_color *= medium.transmittence(&ray, dist_to_light, 0.0, rng);
+                            let transmittence = medium.transmittence(&ray, dist_to_light, 0.0, rng);
+                            additional_color *= transmittence; // / (1.0 - transmittence);
                         }
                         color += additional_color;
                     }
