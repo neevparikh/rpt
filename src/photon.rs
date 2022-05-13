@@ -211,16 +211,31 @@ impl PhotonMap {
         Self::PointMapForBeamEstimate(surface_map, bvh, spheres)
     }
 
-    fn new_beam_map_for_beam_estimate(list: PhotonList) -> Self {
+    fn new_beam_map_for_beam_estimate(list: PhotonList, rng: &mut StdRng) -> Self {
+        let volume_list = list
+            .clone()
+            .1
+            .into_iter()
+            .filter_map(|x| {
+                let thresh = 0.001;
+                if rng.gen::<f64>() < thresh {
+                    let mut new_photon = x.clone();
+                    new_photon.power /= thresh;
+                    Some(new_photon)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
         let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
         });
-        let volume_map = KdTree::build_by(list.clone().1, |a, b, k| {
+        let volume_map = KdTree::build_by(volume_list.clone(), |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
         });
 
-        let mut beams = list
-            .1
+        let mut beams = volume_list
             .into_iter()
             .map(|p| {
                 let max_distance_to_neighbor = volume_map
@@ -646,7 +661,8 @@ impl<'a> Renderer<'a> {
                 PhotonMap::new_point_map_for_beam_estimate(photon_list)
             }
             PhotonRenderKind::PhotonBeamBeam => {
-                PhotonMap::new_beam_map_for_beam_estimate(photon_list)
+                let mut rng = StdRng::from_entropy();
+                PhotonMap::new_beam_map_for_beam_estimate(photon_list, &mut rng)
             }
         };
 
