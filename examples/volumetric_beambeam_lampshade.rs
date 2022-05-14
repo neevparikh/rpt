@@ -4,7 +4,6 @@
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
 use std::fs;
-use std::time::Instant;
 
 use rpt::*;
 
@@ -46,6 +45,32 @@ fn main() -> color_eyre::Result<()> {
         glm::vec3(226.0, 548.8, 319.0),
         glm::vec3(226.0, 548.8, 240.0),
     ]);
+
+    // let shift = glm::vec3(0.0, 70.0, 0.0);
+    // let front_shade = polygon(&[
+    //     glm::vec3(343.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 332.0) - shift,
+    //     glm::vec3(343.0, 548.99, 332.0),
+    //     glm::vec3(343.0, 548.99, 227.0),
+    // ]);
+    // let left_shade = polygon(&[
+    //     glm::vec3(343.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 332.0),
+    //     glm::vec3(343.0, 548.99, 332.0),
+    // ]);
+    // let back_shade = polygon(&[
+    //     glm::vec3(213.0, 548.99, 332.0) - shift,
+    //     glm::vec3(213.0, 548.99, 227.0) - shift,
+    //     glm::vec3(213.0, 548.99, 227.0),
+    //     glm::vec3(213.0, 548.99, 332.0),
+    // ]);
+    // let right_shade = polygon(&[
+    //     glm::vec3(213.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 227.0) - shift,
+    //     glm::vec3(343.0, 548.99, 227.0),
+    //     glm::vec3(213.0, 548.99, 227.0),
+    // ]);
 
     let height = 140.;
     let depth = 105.;
@@ -111,43 +136,37 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(front_shade).material(yellow));
     scene.add(Object::new(back_shade).material(yellow));
 
-    let absorb = 0.00005;
-    let scat = 0.003;
+    let absorb = 0.0001;
+    let scat = 0.001;
+    let size = 128;
     let bounce = 10;
-    let size = 256;
-    let sample = 5000;
-    let every_x = 1000;
-    let watts = 150.0;
+    let sample = 50;
+    let watts = 200_000.0 / (130.0 * 105.0);
+    let photons = 1_000_000;
+
+    let gather_size = 20;
+    let gather_size_volume = 3;
 
     let light_mtl = Material::light(hex_color(0xFFFEFA), watts); // 6500 K
     scene.add((light_rect, light_mtl));
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
-
-    fs::create_dir_all("volumetric_results/")?;
-    let mut time = Instant::now();
-    Renderer::new(&scene, camera)
+    fs::create_dir_all("lampshade/beambeam/")?;
+    let image = Renderer::new(&scene, camera)
         .width(size)
         .height(size)
         .max_bounces(bounce)
         .num_samples(sample)
-        .iterative_render(every_x, |iteration, buffer| {
-            let millis = time.elapsed().as_millis();
-            println!(
-                "Finished iteration {}, took {} ms, variance: {}",
-                iteration,
-                millis,
-                buffer.variance()
-            );
-            buffer
-                .image()
-                .save(format!(
-                    "volumetric_results/output_{:03}.png",
-                    iteration - 1
-                ))
-                .expect("Failed to save image");
-            time = Instant::now();
-        });
+        .gather_size(gather_size)
+        .watts(watts * photons as f64)
+        .gather_size_volume(gather_size_volume)
+        .photon_beam_query_beam_render(photons);
 
+    image
+        .save(format!(
+            "lampshade/beambeam/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
+        ))
+        .expect("Failed to save image");
     Ok(())
 }

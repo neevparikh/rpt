@@ -4,7 +4,6 @@
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
 use std::fs;
-use std::time::Instant;
 
 use rpt::*;
 
@@ -25,7 +24,6 @@ fn main() -> color_eyre::Result<()> {
     let red = Material::diffuse(hex_color(0xBC0000));
     let yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 120.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -138,36 +136,35 @@ fn main() -> color_eyre::Result<()> {
     scene.add(Object::new(front_shade).material(yellow));
     scene.add(Object::new(back_shade).material(yellow));
 
+    let absorb = 0.0001;
+    let scat = 0.001;
+    let size = 128;
+    let bounce = 10;
+    let sample = 50;
+    let watts = 200_000.0 / (130.0 * 105.0);
+    let photons = 1_000_000;
+
+    let gather_size = 20;
+    let gather_size_volume = 3;
+
+    let light_mtl = Material::light(hex_color(0xFFFEFA), watts); // 6500 K
     scene.add((light_rect, light_mtl));
 
-    let absorb = 0.0008;
-    let scat = 0.0008;
-    let size = 512;
-    let bounce = 10;
-    let sample = 100;
-    let watts = 14_000_000.;
-    let photons = 10_000_000;
-
-    let gather_size = 100;
-    let gather_size_volume = 30;
-
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
-
-    fs::create_dir_all("vpm/beam_lamp/")?;
+    fs::create_dir_all("lampshade/beamphoton/")?;
     let image = Renderer::new(&scene, camera)
         .width(size)
         .height(size)
-        // .filter(Filter::Box(1))
         .max_bounces(bounce)
         .num_samples(sample)
         .gather_size(gather_size)
-        .watts(watts)
+        .watts(watts * photons as f64)
         .gather_size_volume(gather_size_volume)
         .photon_point_query_beam_render(photons);
 
     image
         .save(format!(
-            "vpm/lamp/q_{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
+            "lampshade/beamphoton/{}_{}_{}_{}_{}_{}_{}_{}_{}.png",
             size, bounce, sample, photons, watts, gather_size, gather_size_volume, absorb, scat
         ))
         .expect("Failed to save image");

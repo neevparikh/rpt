@@ -3,7 +3,7 @@
 //!
 //! Reference: https://www.graphics.cornell.edu/online/box/data.html
 
-use std::fs::{self, File};
+use std::fs;
 use std::time::Instant;
 
 use rpt::*;
@@ -11,14 +11,6 @@ use rpt::*;
 fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
-    for i in 0..30 {
-        f(i);
-    }
-
-    Ok(())
-}
-
-fn f(i: i32) -> color_eyre::Result<()> {
     let mut scene = Scene::new();
 
     let camera = Camera {
@@ -31,8 +23,8 @@ fn f(i: i32) -> color_eyre::Result<()> {
 
     let white = Material::diffuse(hex_color(0xAAAAAA));
     let red = Material::diffuse(hex_color(0xBC0000));
+    let yellow = Material::diffuse(hex_color(0xBCBC00));
     let green = Material::diffuse(hex_color(0x00BC00));
-    let light_mtl = Material::light(hex_color(0xFFFEFA), 100.0); // 6500 K
 
     let floor = polygon(&[
         glm::vec3(0.0, 0.0, 0.0),
@@ -46,23 +38,37 @@ fn f(i: i32) -> color_eyre::Result<()> {
         glm::vec3(556.0, 548.9, 559.2),
         glm::vec3(0.0, 548.9, 559.2),
     ]);
+
+    // width 130, depth 105
     let light_rect = polygon(&[
-        glm::vec3(343.0, 548.8, 227.0),
-        glm::vec3(343.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 332.0),
-        glm::vec3(213.0, 548.8, 227.0),
-    ])
-    .translate(&glm::vec3(0.0, 0.0, 0.0))
-    .rotate(3.14159265 / 2., &glm::vec3(1.0, 0.0, 0.0))
-    .translate(&glm::vec3(0., -10., 0.));
+        glm::vec3(330.0, 548.8, 240.0),
+        glm::vec3(330.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 319.0),
+        glm::vec3(226.0, 548.8, 240.0),
+    ]);
 
-    let percent = i as f64 / 30.;
-    let rads = percent * 2. * 3.14159265;
+    let height = 140.;
+    let depth = 105.;
+    let width = 130.;
+    let center = glm::vec3(213. + 65., 548., 227. + 55.);
+    let front_offset = center + glm::vec3(0., 0., depth / 2.);
+    let left_offset = center + glm::vec3(-width / 2., 0., 0.);
+    let back_offset = center + glm::vec3(0., 0., -depth / 2.);
+    let right_offset = center + glm::vec3(width / 2., 0., 0.);
 
-    let x = 100. * rads.sin() + 300.;
-    let y = 100. * rads.cos() + 400.;
-
-    let light_rect = load_obj(File::open("examples/cube.obj")?)?.translate(&glm::vec3(x, y, 227.0));
+    let off_axis_size = 10.;
+    let front_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&front_offset);
+    let left_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&left_offset);
+    let back_shade = cube()
+        .scale(&glm::vec3(130. + off_axis_size * 2., height, off_axis_size))
+        .translate(&back_offset);
+    let right_shade = cube()
+        .scale(&glm::vec3(off_axis_size, height, 105. + off_axis_size * 2.))
+        .translate(&right_offset);
 
     let back_wall = polygon(&[
         glm::vec3(0.0, 0.0, 559.2),
@@ -99,35 +105,49 @@ fn f(i: i32) -> color_eyre::Result<()> {
     scene.add(Object::new(right_wall).material(green));
     scene.add(Object::new(large_box).material(white));
     scene.add(Object::new(small_box).material(white));
-    scene.add((light_rect, light_mtl)); // add light and object at the same time
 
-    let absorb = 0.00008;
-    let scat = 0.00008;
-    let size = 256;
+    scene.add(Object::new(right_shade).material(yellow));
+    scene.add(Object::new(left_shade).material(yellow));
+    scene.add(Object::new(front_shade).material(yellow));
+    scene.add(Object::new(back_shade).material(yellow));
+
+    let absorb = 0.00005;
+    let scat = 0.003;
     let bounce = 10;
-    let sample = 500;
-    let photons = 1_000_000;
-    let gather_size = 200;
-    let gather_size_volume = 100;
+    let size = 128;
+    let sample = 1000;
+    let every_x = 100;
+    let watts = 150.0;
+
+    let light_mtl = Material::light(hex_color(0xFFFEFA), watts); // 6500 K
+    scene.add((light_rect, light_mtl));
 
     scene.add(Medium::homogeneous_isotropic(absorb, scat)); // foggy
 
-    let image = Renderer::new(&scene, camera)
+    fs::create_dir_all("lampshade/pathtrace")?;
+    let mut time = Instant::now();
+    Renderer::new(&scene, camera)
         .width(size)
         .height(size)
-        // .filter(Filter::Box(1))
         .max_bounces(bounce)
         .num_samples(sample)
-        .gather_size(gather_size)
-        .gather_size_volume(gather_size_volume)
-        .photon_map_render(photons);
-
-    image
-        .save(format!(
-            "vpm/sphere/{}_{}_{}_{}_{}_{}_{}_{}_{}_{:0>3}.png",
-            size, bounce, sample, photons, 100, gather_size, gather_size_volume, absorb, scat, i
-        ))
-        .expect("Failed to save image");
+        .iterative_render(every_x, |iteration, buffer| {
+            let millis = time.elapsed().as_millis();
+            println!(
+                "Finished iteration {}, took {} ms, variance: {}",
+                iteration,
+                millis,
+                buffer.variance()
+            );
+            buffer
+                .image()
+                .save(format!(
+                    "lampshade/pathtrace/output_{:03}.png",
+                    iteration - 1
+                ))
+                .expect("Failed to save image");
+            time = Instant::now();
+        });
 
     Ok(())
 }
