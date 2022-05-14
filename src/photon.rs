@@ -20,14 +20,20 @@ use crate::{HitRecord, Medium, Object, Renderer};
 
 /// Photon mapping
 
+/// this represents a photon as they are being gathered within the scene.
 #[derive(Debug, Clone)]
 struct Photon {
+    /// the photon's position
     pub position:          glm::DVec3,
+    /// the incoming direction of the photon (used for querying against photons as points)
     pub direction:         glm::DVec3,
     pub power:             glm::DVec3,
+    /// the starting location of the beam ending in this photon (used for querying against photons)
+    /// as beams)
     pub starting_position: glm::DVec3,
 }
 
+/// this impl allows us to store photons in a KDTree
 impl KdPoint for Photon {
     type Scalar = f64;
     type Dim = typenum::U3;
@@ -36,23 +42,37 @@ impl KdPoint for Photon {
     }
 }
 
+/// this represents a photon beam in the medium.
 struct PhotonBeam {
+    /// the start position of the beam
     pub start_position: glm::DVec3,
+    /// the end position of the beam
     pub end_position:   glm::DVec3,
+    /// the beam's radius (usually we set this adaptively based on local density of photons)
     pub radius:         f64,
+    /// this field is just for allowing us to store photon_beams in the BVH
     pub node_index:     usize,
+    /// the ray that start's at the beam start and travels in the beams direction
     pub ray:            Ray,
+    /// the power (watts) stored in this beam
     pub power:          glm::DVec3,
 }
 
+/// this represents a photon beam in the medium or on a surface
 struct PhotonSphere {
+    /// the position of the photon point
     pub position:   glm::DVec3,
+    /// the radius of the photon point (usually set adaptively)
     pub radius:     f64,
+    /// allows us to store PhotonSphere in a BVH
     pub node_index: usize,
+    /// the incoming direction of the photon that generated this sphere
     pub direction:  glm::DVec3,
+    /// the power (watts) stored in this sphere
     pub power:      glm::DVec3,
 }
 
+/// implementing `Bounded` allows us to store a photon_beam in a BVH
 impl Bounded for PhotonBeam {
     fn aabb(&self) -> AABB {
         let ax = self.start_position.x;
@@ -84,6 +104,7 @@ impl Bounded for PhotonBeam {
         )
     }
 }
+/// implementing `BHShape` allows us to store a photon_sphere in a BVH
 impl BHShape for PhotonBeam {
     fn bh_node_index(&self) -> usize {
         self.node_index
@@ -93,6 +114,7 @@ impl BHShape for PhotonBeam {
     }
 }
 
+/// implementing `Bounded` allows us to store a photon_sphere in a BVH
 impl Bounded for PhotonSphere {
     fn aabb(&self) -> AABB {
         let half_size = glm::vec3(self.radius, self.radius, self.radius);
@@ -104,6 +126,7 @@ impl Bounded for PhotonSphere {
         )
     }
 }
+/// implementing `BHShape` allows us to store a photon_sphere in a BVH
 impl BHShape for PhotonSphere {
     fn bh_node_index(&self) -> usize {
         self.node_index
@@ -113,10 +136,20 @@ impl BHShape for PhotonSphere {
     }
 }
 
+/// a PhotonList is a record of photons as they are being gathered in the scene. Note that photons
+/// aren't in an acceleration structure yet (just a big vector) so they aren't suited to be queried
+/// against until we do some processing
 #[derive(Debug, Default, Clone)]
-struct PhotonList(Vec<Photon>, Vec<Photon>);
+struct PhotonList(
+    /// the surface photons
+    Vec<Photon>,
+    /// the volume photons
+    Vec<Photon>,
+);
 
+/// utility methods for working with PhotonList
 impl PhotonList {
+    /// merges a list of PhotonLists
     pub fn merge(lists: Vec<Self>) -> Self {
         let mut out = PhotonList::default();
         for list in lists {
@@ -125,21 +158,19 @@ impl PhotonList {
         }
         out
     }
+    /// adds a surface photon to the PhotonList
     pub fn add_surface(&mut self, photon: Photon) {
         self.0.push(photon)
     }
+    /// adds a bolume photon to the PhotonList
     pub fn add_volume(&mut self, photon: Photon) {
         self.1.push(photon)
     }
 }
 
+/// allows us to print a PhotonList
 impl std::fmt::Display for PhotonList {
-    // This trait requires `fmt` with this exact signature.
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        // Write strictly the first element into the supplied output
-        // stream: `f`. Returns `fmt::Result` which indicates whether the
-        // operation succeeded or failed. Note that `write!` uses syntax which
-        // is very similar to `println!`.
         write!(
             f,
             "PhotonList(surface: {}, volume: {})",
@@ -149,6 +180,8 @@ impl std::fmt::Display for PhotonList {
     }
 }
 
+/// a photon map is a generic wrapper over acceleration structures for photon mapped rendering.
+/// Different sets of acceleration structures facilitate different radiance estimates
 enum PhotonMap {
     PointMapForPointEstimate(KdTree<Photon>, KdTree<Photon>),
     PointMapForBeamEstimate(KdTree<Photon>, BVH, Vec<PhotonSphere>),
@@ -156,6 +189,7 @@ enum PhotonMap {
 }
 
 impl PhotonMap {
+    /// a new photon map for point-point estimate
     fn new_point_map_for_point_estimate(list: PhotonList) -> Self {
         let surface_map = KdTree::build_by(list.0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
@@ -166,6 +200,7 @@ impl PhotonMap {
         Self::PointMapForPointEstimate(surface_map, volume_map)
     }
 
+    /// a new photon map for beam-point estimate
     fn new_point_map_for_beam_estimate(list: PhotonList) -> Self {
         let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
@@ -211,20 +246,24 @@ impl PhotonMap {
         Self::PointMapForBeamEstimate(surface_map, bvh, spheres)
     }
 
+    /// a new photon map for beam-beam estimate
     fn new_beam_map_for_beam_estimate(list: PhotonList, rng: &mut StdRng) -> Self {
         let volume_list = list.clone().1;
 
         let surface_map = KdTree::build_by(list.clone().0, |a, b, k| {
             a.position[k].partial_cmp(&b.position[k]).unwrap()
         });
-        // let volume_map = KdTree::build_by(volume_list.clone(), |a, b, k| {
-        //     a.position[k].partial_cmp(&b.position[k]).unwrap()
-        // });
+        let volume_map = KdTree::build_by(volume_list.clone(), |a, b, k| {
+            a.position[k].partial_cmp(&b.position[k]).unwrap()
+        });
 
+        // turn the naive photon points into photon beams
         let mut beams = volume_list
+            .clone()
             .into_iter()
             .map(|p| {
-                // let max_distance_to_neighbor = volume_map
+                // TODO: the below code snippet implements adaptive beam radius. Add a toggle to
+                // turn it on and off let max_distance_to_neighbor = volume_map
                 //     .nearests(&p, 3)
                 //     .into_iter()
                 //     .map(
@@ -235,7 +274,7 @@ impl PhotonMap {
                 //     .fold(-1., f64::max)
                 //     .sqrt()
                 //     / 10.0;
-                let max_distance_to_neighbor = 12.;
+                let max_distance_to_neighbor = 3.;
                 let beam = PhotonBeam {
                     start_position: p.starting_position.clone(),
                     end_position:   p.position,
@@ -270,10 +309,10 @@ impl PhotonMap {
             Self::PointMapForPointEstimate(surface_map, _) => surface_map,
             Self::PointMapForBeamEstimate(surface_map, _, _) => surface_map,
             Self::BeamMapForBeamEstimate(surface_map, _, _) => surface_map,
-            // _ => todo!(),
         }
     }
 
+    /// performs an estimate of indirect lighting incoming along a ray using a photon map
     fn estimate_indirect(
         &self,
         renderer: &Renderer,
@@ -283,6 +322,8 @@ impl PhotonMap {
     ) -> Color {
         let wo = -glm::normalize(&ray.dir);
 
+        // this closure encapsulates a generic point-based surface indirect illumination estimate
+        // using photon disks
         let surface_estimate = |h: &HitRecord, material: &Material, rng: &mut StdRng| {
             let world_pos = ray.at(h.time);
             let near_photons = self.surface().nearests(
@@ -327,12 +368,14 @@ impl PhotonMap {
             // normalize by (1/(pi * r^2))
             color = color * (1. / (glm::pi::<f64>() * max_dist_squared));
 
-            // direct lighting via light sampling
+            // direct lighting via light sampling. TODO: add a global toggle for this
             // color += renderer.sample_lights(&material, &world_pos, &h.normal, &wo, rng);
 
             color
         };
 
+        // this closure encapsulates an estimate for indirect illumination at a point in a volume
+        // using whatever photon map is available
         let volume_estimate = |medium: &Medium,
                                hit: Option<&HitRecord>,
                                object: Option<&Object>,
@@ -350,7 +393,7 @@ impl PhotonMap {
 
                         let mut color = Color::new(0., 0., 0.);
 
-                        // direct lighting for media particle
+                        // direct lighting for media particle. TODO: add global toggle
                         // color += self.sample_lights_for_media(&medium,
                         // &collision,&wo, rng);
 
@@ -415,7 +458,7 @@ impl PhotonMap {
 
                     let mut volume_color = Color::new(0., 0., 0.);
 
-                    // direct lighting for media particle
+                    // direct lighting for media particle. TODO: toggle
                     // color += self.sample_lights_for_media(&medium, &collision, &wo,
                     // rng);
 
@@ -476,20 +519,29 @@ impl PhotonMap {
 
                     let mut volume_color = Color::new(0., 0., 0.);
 
-                    let mut c = 0;
+                    let mut counter = 0;
 
+                    // blur kernel
                     let k2 = |square_param: f64| {
                         let tmp = 1. - square_param;
                         return (3. / glm::pi::<f64>()) * tmp * tmp;
                     };
 
+                    // implement lighting estimate using equation 38 from this paper
+                    // http://graphics.ucsd.edu/~henrik/papers/volumetric_radiance_using_photon_points_and_beams.pdf
+                    // Recall that we have a beam that represents the camera ray, and a bunch of
+                    // beams that represent photons throughout the scene. We are trying to find
+                    // which photon beams the camera beam intersects.
                     for beam in intersected_beams.iter() {
+                        // for any beam which our naive aabb check hit, find the actual closest
+                        // intersection distance
                         let l = beam.start_position - ray.origin;
                         let u = glm::normalize(&l.cross(&beam.ray.dir));
                         let n = glm::normalize(&beam.ray.dir.cross(&u));
                         let t = n.dot(&l) / n.dot(&ray.dir);
                         let query_collision = ray.at(t);
 
+                        // if this beam is not close enough to contribute, continue
                         if let Some(hit) = hit {
                             if t >= hit.time {
                                 continue;
@@ -518,7 +570,7 @@ impl PhotonMap {
                             dir:    -beam.ray.dir.clone(),
                         };
 
-                        c += 1;
+                        counter += 1;
 
                         let color = extinction
                             * beam.power.component_mul(&medium_color)
@@ -532,8 +584,9 @@ impl PhotonMap {
                         volume_color += color;
                     }
 
+                    // only log sometimes to reduce print spam
                     if rng.gen::<f64>() < 0.00000001 {
-                        dbg!(c);
+                        dbg!(counter);
                         dbg!(intersected_beams.len());
                     }
                     volume_color
@@ -541,6 +594,9 @@ impl PhotonMap {
             }
         };
 
+        // check the various relevant conditions (medium or no medium, whether the camera ray hits a
+        // surface or not, what time of photon map we're using). This determines which estimate we
+        // use.
         match renderer.get_closest_hit(*ray) {
             None => match medium {
                 None => renderer.scene.environment.get_color(&ray.dir), // TODO attenuate
@@ -572,9 +628,13 @@ impl PhotonMap {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum PhotonRenderKind {
+    /// query with a camera point against photon points
     PhotonMap,
+    /// query with a camera beam against photon points
     PhotonPointBeam,
+    /// query with a camera beam against photon beams
     PhotonBeamBeam,
 }
 
@@ -593,20 +653,13 @@ impl<'a> Renderer<'a> {
 
     /// renders an image using photon mapping
     pub fn photon_render(&self, photon_count: usize, kind: PhotonRenderKind) -> RgbImage {
-        // ensure that scene only has object lights (may not be necessary)
-        for light in self.scene.lights.iter() {
-            match light {
-                Light::Object(_) => {}
-                _ => {
-                    // panic!("Only object lights are supported for photon mapping");
-                }
-            }
-        }
-
         println!("Shooting photons");
 
+        // setup progress bar
         let pb = ProgressBar::new(photon_count as u64);
         pb.set_draw_rate(1);
+
+        // parallel photon shooting
         let photon_list = (0..photon_count)
             .collect::<Vec<_>>()
             .into_par_iter()
@@ -616,7 +669,7 @@ impl<'a> Renderer<'a> {
           {
               let mut rng = StdRng::from_entropy();
               let power = self.watts / photon_count as f64;
-              self.shoot_photon(power, &mut rng)
+              self.shoot_photon(power, &mut rng, kind)
           })
             .collect::<Vec<_>>();
         let photon_list = PhotonList::merge(photon_list);
@@ -668,8 +721,9 @@ impl<'a> Renderer<'a> {
 
     /// shoot a photon from a random light with power `power` and return a list of
     /// photons that have gathered in the scene
-    fn shoot_photon(&self, power: f64, rng: &mut StdRng) -> PhotonList {
-        // FIXME: sample random light based on area instead of looping
+    fn shoot_photon(&self, power: f64, rng: &mut StdRng, kind: PhotonRenderKind) -> PhotonList {
+        // FIXME: sample random light based on area instead of looping. This works well on scenes
+        // with one main light though :)
         for light in self.scene.lights.iter() {
             // sample a random point on the light and a random direction in the hemisphere
             if let Light::Object(object) = light {
@@ -712,19 +766,27 @@ impl<'a> Renderer<'a> {
                     0,
                 );
 
+                // if we are building a photon map for a beam to beam estimate, we need far fewer
+                // volume photons than surface photons. We continually throw out volume photons and
+                // scale up the remaining ones so we have fewer volume photons overall but they have
+                // the same amount of energy.
                 let PhotonList(surface, volume) = photons;
                 let photons = PhotonList(
                     surface,
                     volume
                         .into_iter()
                         .filter_map(|x| {
-                            let thresh = 0.001;
-                            if rng.gen::<f64>() < thresh {
-                                let mut new_photon = x.clone();
-                                new_photon.power /= thresh;
-                                Some(new_photon)
+                            if let PhotonRenderKind::PhotonBeamBeam = kind {
+                                let thresh = 0.001;
+                                if rng.gen::<f64>() < thresh {
+                                    let mut new_photon = x.clone();
+                                    new_photon.power /= thresh;
+                                    Some(new_photon)
+                                } else {
+                                    None
+                                }
                             } else {
-                                None
+                                Some(x)
                             }
                         })
                         .collect::<Vec<_>>(),
@@ -747,6 +809,7 @@ impl<'a> Renderer<'a> {
     ) -> PhotonList {
         let wo = -glm::normalize(&ray.dir);
 
+        // generic code for bouncing a photon off a surface and leaving a photon there
         let trace_on_surface =
             |power: glm::DVec3, h: &HitRecord, object: &Object, rng: &mut StdRng| {
                 let world_pos = ray.at(h.time);
@@ -810,6 +873,7 @@ impl<'a> Renderer<'a> {
                 }
             };
 
+        // generic code for bouncing a photon in a volume and leaving a photon hanging in the air.
         let trace_in_volume =
             |power: glm::DVec3, medium: &Medium, d: f64, _d_pdf: f64, rng: &mut StdRng| {
                 let collision = ray.at(d);
