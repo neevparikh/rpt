@@ -2,6 +2,13 @@
 
 You will need `rustc` and `cargo` to run. You can get them at https://rustup.rs/
 
+## Results
+
+<img width="416" alt="image" src="https://github.com/neevparikh/rpt/assets/41182432/d1d45e1b-1b1b-453a-a645-1c1dcb5d9fb8">
+<img width="380" alt="image" src="https://github.com/neevparikh/rpt/assets/41182432/ad45e6f9-dd23-4135-aa54-e20ae6938f23">
+<img width="367" alt="image" src="https://github.com/neevparikh/rpt/assets/41182432/4f80c44a-80d2-487d-87a7-80c1d03eba12">
+
+
 ## Running examples
 
 ```
@@ -27,3 +34,5 @@ To clarify: the variation comes in how you lookup into the photon map. With base
 ## Where is the code
 
 Our work is primarily in `src/photon.rs`, `src/medium.rs`, `src/renderer.rs`, `src/material.rs`.
+
+
